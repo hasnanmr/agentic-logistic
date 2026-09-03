@@ -11,31 +11,21 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.llm import ToolCall
+from backend.agent import build_agent
 from backend.main import app
 from backend.orchestrator import answer_question
+from backend.tests.scripted_model import ScriptedChatModel, ToolCall, script_for
 
 
 CREDENTIALS = {"APP_USERNAME": "reviewer", "APP_PASSWORD": "s3cret"}
 
 
-class StubLLMClient:
-    """Deterministic stand-in that always selects one tool with fixed arguments."""
+def agent_calling(name: str, arguments: dict[str, Any]) -> Any:
+    """An agent whose model makes exactly one fixed tool call."""
 
-    def __init__(self, name: str, arguments: dict[str, Any]) -> None:
-        self._name = name
-        self._arguments = arguments
-        self.received_history: list[dict[str, str]] | None = None
-
-    def choose_tool(
-        self,
-        question: str,
-        tools: list[dict[str, Any]],
-        system_prompt: str,
-        history: list[dict[str, str]] | None = None,
-    ) -> ToolCall | None:
-        self.received_history = history
-        return ToolCall(name=self._name, arguments=self._arguments)
+    return build_agent(
+        ScriptedChatModel(script=script_for(ToolCall(name, arguments)))
+    )
 
 
 @pytest.fixture()
@@ -69,7 +59,7 @@ def test_ranking_numbers_reconcile_between_dashboard_and_ask(
 
     ask_response = answer_question(
         "Which carrier has the highest delay rate?",
-        StubLLMClient("query_tool", DELAY_RATE_BY_CARRIER),
+        agent_calling("query_tool", DELAY_RATE_BY_CARRIER),
     )
 
     assert ask_response.unsupported is False
@@ -94,7 +84,7 @@ def test_scalar_kpi_reconciles_between_dashboard_and_ask(
 
     ask_response = answer_question(
         "What is the on-time rate for UPS?",
-        StubLLMClient("query_tool", scalar_request),
+        agent_calling("query_tool", scalar_request),
     )
 
     assert ask_response.table is not None

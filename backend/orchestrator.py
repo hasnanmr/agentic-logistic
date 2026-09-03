@@ -1,367 +1,255 @@
-"""Turn a natural-language question into a validated tool call and an answer.
+"""Turn a natural-language question into governed tool calls and an answer.
 
 The division of labour is the point of the whole design: the model interprets
-the question and picks a tool, application code computes every number. The model
-never sees a row of data and never writes the figures in the answer, so a
-hallucinated number has nowhere to enter (PRD 9).
+the question and drives the tools, application code computes every number. The
+model never sees a row of data, and by default it never writes a figure in the
+answer either, so a hallucinated number has nowhere to enter (PRD 9).
 
-Routing is the model's tool choice - ``query_tool`` versus ``forecast_tool`` -
-rather than a separate classification step. ``operation`` is injected from the
-chosen tool name instead of being asked for, so the model cannot pick a tool and
-then contradict itself in the arguments.
+Since the refactor onto ``deepagents`` this module is no longer the loop - see
+:mod:`backend.agent` for that. What stays here is the boundary the API depends
+on: run the agent, decide whether the run produced an answer or a refusal, and
+assemble the :class:`AskResponse` from what the tools filed.
 """
 
 from __future__ import annotations
 
+from time import perf_counter
 from typing import Any, Final
 
 import pandas as pd
-from pydantic import ValidationError
 
-from backend import chart_rules
-from backend.forecast import build_forecast_details, run_forecast
+from backend import grounding
+from backend.agent import (
+    MAX_HISTORY_TURNS,
+    SYSTEM_PROMPT,
+    AgentRun,
+    narration_mode,
+    run_agent,
+)
+from backend.agent_tools import FORECAST_TOOL, QUERY_TOOL, tool_definitions
+from backend.answers import SUPPORTED_CAPABILITIES
+from backend.carrier_knowledge import compose_carrier_answer
 from backend.ingestion import get_dataset
-from backend.llm import LLMClient, ToolCall
-from backend.metrics import METRICS, get_metric
-from backend.query_tool import QueryToolError, prepare, run_query
+from backend.smalltalk import compose_smalltalk_answer
 from backend.schemas import (
     AskResponse,
-    Explainability,
-    ExplainedTimeRange,
-    ForecastResult,
-    ForecastStructuredRequest,
-    MetricBasis,
-    QueryResult,
-    QueryStructuredRequest,
-    ResolvedFilters,
+    AskResult,
+    CarrierKnowledge,
+    CarrierKnowledgeItem,
+    Runtime,
+    SmalltalkReply,
 )
 
 
-QUERY_TOOL: Final = "query_tool"
-FORECAST_TOOL: Final = "forecast_tool"
+__all__ = [
+    "FORECAST_TOOL",
+    "MAX_HISTORY_TURNS",
+    "QUERY_TOOL",
+    "SUPPORTED_CAPABILITIES",
+    "SYSTEM_PROMPT",
+    "answer_question",
+    "tool_definitions",
+]
 
-SYSTEM_PROMPT: Final = """You convert logistics questions into one tool call.
-
-Call query_tool for questions about what happened: counts, rates, delivery time,
-trends over time, breakdowns, comparisons, and rankings.
-Call forecast_tool for questions about future order demand.
-
-Never answer from your own knowledge and never invent metrics, dimensions, or
-filters outside the tool schemas. If the question cannot be expressed with the
-available metrics and dimensions - for example it asks about cost, profit,
-customer satisfaction, or the cause of something - do not call a tool at all.
-
-Extract the horizon for forecasts ("the next 4 weeks" -> horizon_weeks 4); if a
-forecast question gives no horizon, use 4.
-
-When prior conversation turns are supplied, resolve follow-ups against them: a
-question like "what about the second highest?" or "and last month?" refers to
-the subject of the previous turn, so restate the full question to yourself as a
-complete tool call. Every tool call must still be fully specified - the history
-provides context for interpretation only, never defaults that override the
-user's words."""
-
-#: Follow-up context is bounded so a long chat cannot silently balloon the
-#: prompt; the API layer enforces the same bound on the request shape.
-MAX_HISTORY_TURNS: Final = 10
-
-#: Reported back to the user whenever a question falls outside the grammar.
-SUPPORTED_CAPABILITIES: Final = (
-    "Supported metrics: "
-    + ", ".join(sorted(METRICS))
-    + ". Supported breakdowns: carrier, region, origin_city, destination_city, "
-    "product_category, status, and time buckets (day, week, month). "
-    "Demand can be forecast 1-8 weeks ahead."
-)
-
-_PERCENT_METRICS: Final[frozenset[str]] = frozenset({"on_time_rate", "delay_rate"})
+#: Marks a tool call the runtime rejected before our code saw it - an unknown
+#: tool name rather than bad arguments for a real one.
+_UNKNOWN_TOOL_MARKERS: Final = ("is not a valid tool", "not found", "no tool named")
 
 
-def _tool_schema(model: type, name: str, description: str) -> dict[str, Any]:
-    """Expose a request model as a tool, minus the redundant discriminator."""
-
-    schema = model.model_json_schema()
-    schema["properties"].pop("operation", None)
-    schema["required"] = [
-        field for field in schema.get("required", []) if field != "operation"
-    ]
-    return {
-        "type": "function",
-        "function": {"name": name, "description": description, "parameters": schema},
-    }
-
-
-def tool_definitions() -> list[dict[str, Any]]:
-    return [
-        _tool_schema(
-            QueryStructuredRequest,
-            QUERY_TOOL,
-            "Compute a delivery metric over the order dataset, optionally broken "
-            "down by a dimension, filtered, sorted, and limited.",
-        ),
-        _tool_schema(
-            ForecastStructuredRequest,
-            FORECAST_TOOL,
-            "Forecast weekly order demand between 1 and 8 weeks ahead.",
-        ),
-    ]
-
-
-def _format(metric_name: str, value: object) -> str:
-    if value is None:
-        return "not available"
-    if metric_name in _PERCENT_METRICS:
-        return f"{value}%"
-    if metric_name == "avg_delivery_time":
-        return f"{value} days"
-    if isinstance(value, float) and value.is_integer():
-        return str(int(value))
-    return str(value)
-
-
-def _unsupported(reason: str) -> AskResponse:
+def _unsupported(reason: str, thread_id: str | None = None) -> AskResponse:
     return AskResponse(
         answer="",
-        chart=None,
-        table=None,
-        explainability=None,
+        results=[],
+        thread_id=thread_id,
         unsupported=True,
         unsupported_reason=f"{reason} {SUPPORTED_CAPABILITIES}",
     )
 
 
-def _query_plan(request: QueryStructuredRequest) -> str:
-    steps = ["filter orders"] if request.filters else []
-    if request.time_range is not None:
-        steps.append("restrict to the resolved time range")
-    if request.dimensions:
-        steps.append(f"group by {', '.join(request.dimensions)}")
-    steps.append(f"compute {request.metric}")
-    if request.sort is not None:
-        steps.append(f"sort by {request.sort.by} {request.sort.direction}")
-    if request.dimensions:
-        steps.append(f"limit {request.limit}")
-    return " -> ".join(steps)
+def _attempted_a_tool(run: AgentRun) -> bool:
+    """Whether the run tried to compute something, or ruled the question out."""
+
+    return bool(
+        run.collector.failures or run.tool_errors or run.collector.decline is not None
+    )
 
 
-def _compose_query_answer(
-    request: QueryStructuredRequest, result: QueryResult
-) -> str:
-    metric = get_metric(request.metric)
+def _refusal_reason(run: AgentRun) -> str:
+    """Why a run that computed nothing produced no answer.
 
-    if not request.dimensions:
-        return f"{metric.label} is {_format(metric.name, result.rows[0][0])}."
+    The most specific explanation wins: a grammar violation our own tools
+    raised, then arguments the tool schema rejected, then a model that declined
+    to call a tool at all.
+    """
 
-    if result.row_count == 0:
-        return "No orders match those filters, so there is nothing to report."
+    if run.collector.decline is not None:
+        return run.collector.decline.rstrip(".") + "."
 
-    dimension = request.dimensions[0]
-    leader = result.rows[0]
-    if request.sort is not None and request.limit == 1:
-        superlative = "highest" if request.sort.direction == "desc" else "lowest"
+    if run.collector.failures:
+        return run.collector.failures[-1].reason.rstrip(".") + "."
+
+    if run.tool_errors:
+        if any(
+            marker in error.lower()
+            for error in run.tool_errors
+            for marker in _UNKNOWN_TOOL_MARKERS
+        ):
+            return "The agent asked for a tool that does not exist."
         return (
-            f"{leader[0]} has the {superlative} {metric.label.lower()} at "
-            f"{_format(metric.name, leader[-1])}."
+            "The request did not match the approved query grammar "
+            f"({len(run.tool_errors)} rejected call(s))."
         )
 
-    summary = (
-        f"{metric.label} by {dimension} across {result.row_count} "
-        f"{'group' if result.row_count == 1 else 'groups'}."
-    )
-    if request.sort is not None:
-        summary += (
-            f" Leading: {leader[0]} at {_format(metric.name, leader[-1])}."
-        )
-    if result.truncated:
-        summary += f" Showing the first {len(result.rows)}."
-    return summary
+    return "That question cannot be answered from this dataset."
 
 
-def _compose_forecast_answer(result: ForecastResult) -> str:
-    if result.insufficient_data:
-        return (
-            "There is not enough history to forecast demand: "
-            f"{result.insufficient_data_reason}."
-        )
-    level = result.recommendation.forecast_level
-    weeks = result.horizon_weeks
-    return (
-        f"Order demand for the next {weeks} week{'s' if weeks != 1 else ''} projects "
-        f"to about {level} orders per week. {result.recommendation.text}"
-    )
+def _with_runtime(results: list[AskResult], runtime: Runtime) -> list[AskResult]:
+    """Stamp the run's timings onto every result block.
 
+    Measured around the whole agent run - planning, model calls and
+    computation - rather than in the API layer, so the number excludes the HTTP
+    round trip. One agent run produces all the blocks, so they share it.
+    """
 
-def _forecast_preview(result: ForecastResult) -> QueryResult:
-    """The forecast's underlying series, as an inspectable table (FR-10)."""
-
-    rows: list[list[object]] = [
-        [point.period, point.value, "actual"] for point in result.history
-    ]
-    rows += [[point.period, point.value, "forecast"] for point in result.forecast]
-    return QueryResult(
-        columns=["period", "order_demand", "series"],
-        rows=rows,
-        row_count=len(rows),
-        metric="order_demand",
-        resolved_time_range=None,
-        truncated=False,
-    )
-
-
-def _query_explainability(
-    question: str,
-    request: QueryStructuredRequest,
-    result: QueryResult,
-    frame: pd.DataFrame,
-) -> Explainability:
-    metric = get_metric(request.metric)
-    window = result.resolved_time_range
-    return Explainability(
-        question=question,
-        structured_request={"operation": "query", **request.model_dump(mode="json")},
-        metric_definition=metric.describe(frame),
-        metric_basis=MetricBasis(
-            row_count=metric.basis_count(frame), inclusion_rule=metric.inclusion_rule
-        ),
-        resolved_filters=ResolvedFilters(
-            time_range=(
-                ExplainedTimeRange(
-                    start=window.start, end=window.end, means="reported_period"
+    return [
+        result.model_copy(
+            update={
+                "explainability": result.explainability.model_copy(
+                    update={"runtime": runtime}
                 )
-                if window is not None
-                else None
-            ),
-            filters=request.filters,
-        ),
-        query_plan=_query_plan(request),
-        result_preview=result,
-        forecast_details=None,
-    )
+            }
+        )
+        for result in results
+    ]
 
 
-def _forecast_explainability(
-    question: str, request: ForecastStructuredRequest, result: ForecastResult
-) -> Explainability:
-    return Explainability(
-        question=question,
-        structured_request={
-            "operation": "forecast",
-            **request.model_dump(mode="json"),
-        },
-        metric_definition=(
-            "orders per complete ISO week "
-            f"(n={result.history_window.observations} weeks)"
-        ),
-        metric_basis=MetricBasis(
-            row_count=result.history_window.observations,
-            inclusion_rule=(
-                "complete ISO weeks only; part-weeks at either end of the data "
-                "are excluded because they measure a shorter period"
-            ),
-        ),
-        resolved_filters=ResolvedFilters(
-            time_range=ExplainedTimeRange(
-                start=result.history_window.start,
-                end=result.history_window.end,
-                means="history_window",
-            ),
-            filters=request.filters,
-        ),
-        query_plan=(
-            "aggregate orders per complete ISO week -> 4-week moving average -> "
-            f"project {result.horizon_weeks} week(s) -> compare with the trailing "
-            "baseline"
-        ),
-        result_preview=_forecast_preview(result),
-        forecast_details=build_forecast_details(result),
-    )
+def _compose_answer(run: AgentRun, results: list[AskResult]) -> tuple[str, str]:
+    """The answer text and how it was produced.
 
+    Composed prose is the default and the fallback. The agent's own synthesis
+    is used only in ``verified`` mode and only when every number in it traces
+    to a computed result, which is what makes it safe to print.
+    """
 
-def _handle_query(
-    question: str, arguments: dict[str, Any], frame: pd.DataFrame | None
-) -> AskResponse:
-    request = QueryStructuredRequest.model_validate(
-        {**arguments, "operation": "query"}
-    )
-    result = run_query(request, frame)
-    resolved = prepare(request, frame)
-
-    return AskResponse(
-        answer=_compose_query_answer(request, result),
-        chart=chart_rules.select_chart(result, request.dimensions),
-        table=result,
-        explainability=_query_explainability(question, request, result, resolved.frame),
-        unsupported=False,
-        unsupported_reason=None,
-    )
-
-
-def _handle_forecast(
-    question: str, arguments: dict[str, Any], frame: pd.DataFrame | None
-) -> AskResponse:
-    request = ForecastStructuredRequest.model_validate(
-        {**arguments, "operation": "forecast"}
-    )
-    result = run_forecast(request, frame)
-
-    return AskResponse(
-        answer=_compose_forecast_answer(result),
-        chart=chart_rules.forecast_chart(result),
-        table=_forecast_preview(result),
-        explainability=_forecast_explainability(question, request, result),
-        unsupported=False,
-        unsupported_reason=None,
-    )
+    composed = " ".join(result.answer for result in results)
+    if (
+        narration_mode() == "verified"
+        and run.narration
+        and grounding.is_grounded(run.narration, results)
+    ):
+        return run.narration, "model"
+    return composed, "composed"
 
 
 def answer_question(
     question: str,
-    client: LLMClient,
+    agent: Any | None = None,
     frame: pd.DataFrame | None = None,
     history: list[dict[str, str]] | None = None,
+    thread_id: str | None = None,
 ) -> AskResponse:
-    """Interpret a question, run the chosen tool, and compose a grounded answer.
+    """Run a question through the agent and assemble a grounded answer.
 
-    Every failure mode - the model declining, arguments that break the contract,
-    a request that parses but is not allowed - resolves to an explained
-    unsupported response rather than a guess (FR-15).
+    Every failure mode - the agent declining, arguments that break the
+    contract, a request that parses but is not allowed - resolves to an
+    explained unsupported response rather than a guess (FR-15).
 
-    ``history`` is prior conversation as role/content messages (oldest first),
-    used only so the model can resolve follow-up questions; it never carries
-    numbers into the answer.
+    ``agent`` defaults to the process-wide agent; tests pass one built around a
+    scripted model. ``history`` is prior conversation as role/content messages
+    for a stateless client, while ``thread_id`` continues a conversation the
+    server already holds. Neither ever carries numbers into the answer.
     """
 
     if not question.strip():
         return _unsupported("Ask a question about the delivery data.")
 
+    # A greeting has nothing to compute. Answering it from a template costs no
+    # model call and keeps "halo" working when the provider is down; the match
+    # is whole-message, so a greeting attached to a real question falls
+    # through to the agent.
+    greeting = compose_smalltalk_answer(question)
+    if greeting is not None:
+        return AskResponse(
+            answer=greeting.reply,
+            smalltalk=SmalltalkReply(
+                intent=greeting.intent, language=greeting.language
+            ),
+            thread_id=thread_id,
+            unsupported=False,
+            unsupported_reason=None,
+        )
+
+    # Carrier descriptions are static, source-backed knowledge. Resolve them
+    # before building the LLM agent so glossary questions work even when the
+    # analytics model is unavailable, and keep performance questions on the
+    # governed Query Tool path.
+    carrier_answer = compose_carrier_answer(question)
+    if carrier_answer is not None:
+        answer, definitions = carrier_answer
+        return AskResponse(
+            answer=answer,
+            carrier_knowledge=CarrierKnowledge(
+                items=[
+                    CarrierKnowledgeItem(
+                        name=definition.name,
+                        expanded_name=definition.expanded_name,
+                        description=definition.description,
+                        source_url=definition.source_url,
+                    )
+                    for definition in definitions
+                ]
+            ),
+            thread_id=thread_id,
+            unsupported=False,
+            unsupported_reason=None,
+        )
+
     source = get_dataset() if frame is None else frame
 
-    # Keep only the most recent turns, oldest first. A turn is a user message
-    # plus its assistant reply; drop from the front in whole turns so the model
-    # never sees a reply whose question was cut.
-    recent_history = (history or [])[-2 * MAX_HISTORY_TURNS:]
-    if len(recent_history) % 2:
-        recent_history = recent_history[1:]
-
-    call: ToolCall | None = client.choose_tool(
-        question, tool_definitions(), SYSTEM_PROMPT, history=recent_history
+    started = perf_counter()
+    run = run_agent(
+        question, source, agent=agent, history=history, thread_id=thread_id
     )
-    if call is None:
-        return _unsupported(
-            "That question cannot be answered from this dataset."
-        )
+    total_ms = (perf_counter() - started) * 1000
 
-    try:
-        if call.name == QUERY_TOOL:
-            return _handle_query(question, call.arguments, source)
-        if call.name == FORECAST_TOOL:
-            return _handle_forecast(question, call.arguments, source)
-    except ValidationError as error:
-        return _unsupported(
-            f"The request did not match the approved query grammar "
-            f"({error.error_count()} field problem(s))."
-        )
-    except (QueryToolError, KeyError) as error:
-        return _unsupported(str(error).strip("'") + ".")
+    if not run.collector.results:
+        # A message that needed no tool - a question about what the agent can
+        # do, a greeting the templates do not match - is answered by the agent
+        # itself. Its prose still has to pass the numeric check: with nothing
+        # computed, any figure in it would be invented, so the check rejects
+        # it outright and the canned refusal is used instead. A question the
+        # agent ruled out with decline_tool never takes this path.
+        if (
+            not _attempted_a_tool(run)
+            and run.narration
+            and grounding.is_grounded(run.narration, [])
+        ):
+            return AskResponse(
+                answer=run.narration,
+                results=[],
+                plan=run.plan,
+                narration="model",
+                narrated=True,
+                thread_id=run.thread_id,
+                unsupported=False,
+                unsupported_reason=None,
+            )
+        return _unsupported(_refusal_reason(run), thread_id=run.thread_id)
 
-    return _unsupported(f"'{call.name}' is not an available tool.")
+    runtime = Runtime(
+        total_ms=round(total_ms, 1),
+        model_ms=round(max(total_ms - run.compute_ms, 0.0), 1),
+        compute_ms=round(min(run.compute_ms, total_ms), 1),
+    )
+    results = _with_runtime(run.collector.results, runtime)
+    answer, narration = _compose_answer(run, results)
+
+    return AskResponse(
+        answer=answer,
+        results=results,
+        plan=run.plan,
+        narration=narration,
+        thread_id=run.thread_id,
+        unsupported=False,
+        unsupported_reason=None,
+    )

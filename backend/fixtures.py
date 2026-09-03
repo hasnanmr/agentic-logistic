@@ -155,17 +155,27 @@ FORECAST_EXPLAINABILITY_FIXTURE = Explainability.model_validate(
 ASK_RESPONSE_FIXTURE = AskResponse.model_validate(
     {
         "answer": "FedEx has the highest delay rate at 18.2%.",
-        "chart": {
-            "type": "bar",
-            "x": "carrier",
-            "y": "delay_rate",
-            "data": [
-                {"carrier": "FedEx", "delay_rate": 18.2},
-                {"carrier": "UPS", "delay_rate": 12.4},
-            ],
-        },
-        "table": QUERY_RESULT_FIXTURE.model_dump(mode="json"),
-        "explainability": EXPLAINABILITY_FIXTURE.model_dump(mode="json"),
+        # One block per tool call. `chart`, `table` and `explainability` are
+        # read-only views of the first block, so they are not supplied here.
+        "results": [
+            {
+                "answer": "FedEx has the highest delay rate at 18.2%.",
+                "chart": {
+                    "type": "bar",
+                    "x": "carrier",
+                    "y": "delay_rate",
+                    "data": [
+                        {"carrier": "FedEx", "delay_rate": 18.2},
+                        {"carrier": "UPS", "delay_rate": 12.4},
+                    ],
+                },
+                "table": QUERY_RESULT_FIXTURE.model_dump(mode="json"),
+                "explainability": EXPLAINABILITY_FIXTURE.model_dump(mode="json"),
+            }
+        ],
+        "plan": [],
+        "narration": "composed",
+        "thread_id": "ask-fixture",
         "unsupported": False,
         "unsupported_reason": None,
     }

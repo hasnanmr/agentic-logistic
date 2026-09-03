@@ -1614,3 +1614,60 @@ a {
     width: 100vw;
   }
 }
+
+/* --- Ask: one block per tool call ---------------------------------------- */
+
+/* A compound answer stacks several computed blocks; the rule separates them
+   without boxing each one, which would fight the chat bubble it sits in. */
+.ask-result-block + .ask-result-block {
+  margin-top: 1.1rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--border);
+}
+
+.ask-result-label {
+  margin: 0 0 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-secondary);
+}
+
+/* --- Trace: the agent's own plan ----------------------------------------- */
+
+.trace-plan {
+  margin: 0.6rem 0 0;
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.trace-plan-step {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  font-size: 0.82rem;
+  color: var(--ink-secondary);
+}
+
+/* Completed work recedes; the step in flight is the one worth reading. */
+.trace-plan-step.is-completed .trace-plan-text {
+  text-decoration: line-through;
+  opacity: 0.65;
+}
+
+.trace-plan-step.is-in_progress .trace-plan-text {
+  font-weight: 600;
+  color: var(--ink-primary);
+}
+
+.trace-plan-status {
+  flex: none;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-secondary);
+  opacity: 0.8;
+}

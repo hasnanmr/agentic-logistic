@@ -1,12 +1,15 @@
 """Stream E: routing, answer composition, explainability, and chart rules.
 
-Every test drives a stub model, so the suite needs no API key and asserts on
-behaviour that is fully determined by application code. What the real model
-does is choose a tool and its arguments; these tests fix that choice and check
-everything downstream of it.
+Every test drives a scripted model through the real deepagents graph, so the
+suite needs no API key and still exercises the loop that ships - tool calls,
+rejections, retries and all. What the real model does is choose tools and their
+arguments; these tests fix that choice and check everything downstream of it.
 """
 
 from __future__ import annotations
+
+from time import sleep
+from typing import Any
 
 import pandas as pd
 import pytest
@@ -15,8 +18,9 @@ from fastapi.testclient import TestClient
 from backend.chart_rules import forecast_chart, select_chart
 from backend.forecast import run_forecast
 from backend.ingestion import load_dataset
-from backend.llm import ToolCall
+from backend.agent import build_agent
 from backend.main import app
+from backend.agent_tools import DECLINE_TOOL
 from backend.orchestrator import (
     FORECAST_TOOL,
     QUERY_TOOL,
@@ -25,6 +29,12 @@ from backend.orchestrator import (
 )
 from backend.query_tool import run_query
 from backend.schemas import ForecastStructuredRequest, QueryStructuredRequest
+from backend.tests.scripted_model import (
+    ScriptedChatModel,
+    ToolCall,
+    says,
+    script_for,
+)
 
 
 AUTH = ("reviewer", "s3cret")
@@ -35,22 +45,16 @@ def dataset() -> pd.DataFrame:
     return load_dataset("mock_logistics_data.csv")
 
 
-class StubClient:
-    """A model that always makes the tool call it was constructed with."""
+def agent_for(*calls: ToolCall | None) -> tuple[Any, ScriptedChatModel]:
+    """A real agent graph driven by a model scripted to make ``calls``."""
 
-    def __init__(self, call: ToolCall | None) -> None:
-        self.call = call
-        self.seen: list[str] = []
-        self.received_history: list[dict[str, str]] | None = None
-
-    def choose_tool(self, question, tools, system_prompt, history=None):  # noqa: ANN001
-        self.seen.append(question)
-        self.received_history = history
-        return self.call
+    model = ScriptedChatModel(script=script_for(*calls))
+    return build_agent(model), model
 
 
 def ask(question: str, call: ToolCall | None, frame: pd.DataFrame):
-    return answer_question(question, StubClient(call), frame)
+    agent, _ = agent_for(call)
+    return answer_question(question, agent, frame)
 
 
 # --- tool surface -----------------------------------------------------------
@@ -173,14 +177,71 @@ def test_answer_numbers_come_from_the_tool_not_the_model(
 # --- unsupported paths ------------------------------------------------------
 
 
-def test_declined_tool_call_becomes_an_explained_refusal(
+def test_a_declared_decline_becomes_an_explained_refusal(
     dataset: pd.DataFrame,
 ) -> None:
-    response = ask("Which carrier is most profitable?", None, dataset)
+    """A data question the dataset cannot serve is refused with its reason.
+
+    The agent says so through decline_tool rather than by staying silent, so
+    the refusal can quote why and still list what is available (FR-15).
+    """
+
+    response = ask(
+        "Which carrier is most profitable?",
+        ToolCall(DECLINE_TOOL, {"reason": "profit per carrier is not in this dataset"}),
+        dataset,
+    )
 
     assert response.unsupported is True
     assert response.explainability is None
+    assert "profit per carrier is not in this dataset" in response.unsupported_reason
     assert "Supported metrics" in response.unsupported_reason
+
+
+def test_a_message_needing_no_tool_is_answered_in_the_agents_own_words(
+    dataset: pd.DataFrame,
+) -> None:
+    """A question about the agent itself is a reply, not a refusal."""
+
+    model = ScriptedChatModel(
+        script=[says("I read this delivery dataset. Ask me about delays or demand.")]
+    )
+
+    response = answer_question("are you a logistics expert?", build_agent(model), dataset)
+
+    assert response.unsupported is False
+    assert response.narrated is True
+    assert response.narration == "model"
+    assert response.answer.startswith("I read this delivery dataset")
+
+
+def test_a_figure_the_agent_invented_is_never_printed(dataset: pd.DataFrame) -> None:
+    """Prose with an ungrounded number falls back to the explained refusal."""
+
+    model = ScriptedChatModel(script=[says("Yes - we shipped 4210 orders last year.")])
+
+    response = answer_question("are you a logistics expert?", build_agent(model), dataset)
+
+    assert response.unsupported is True
+    assert response.narrated is False
+    assert "4210" not in (response.unsupported_reason or "")
+
+
+def test_every_non_greeting_turn_reaches_the_agent_with_every_tool(
+    dataset: pd.DataFrame,
+) -> None:
+    """Anything that is not a template greeting is answered with tools in hand.
+
+    The greeting short-circuit is the only path that skips the agent, so a
+    real question must always arrive with the full tool surface bound - the
+    two governed analytics tools plus the explicit decline.
+    """
+
+    agent, model = agent_for(ToolCall(QUERY_TOOL, {"metric": "total_orders"}))
+
+    answer_question("how many orders are there?", agent, dataset)
+
+    assert set(model.offered_tools) >= {QUERY_TOOL, FORECAST_TOOL, DECLINE_TOOL}
 
 
 def test_arguments_outside_the_grammar_are_refused(dataset: pd.DataFrame) -> None:
@@ -216,12 +277,12 @@ def test_unknown_tool_name_is_refused(dataset: pd.DataFrame) -> None:
 def test_blank_question_is_refused_without_calling_the_model(
     dataset: pd.DataFrame,
 ) -> None:
-    client = StubClient(ToolCall(QUERY_TOOL, {"metric": "total_orders"}))
+    agent, model = agent_for(ToolCall(QUERY_TOOL, {"metric": "total_orders"}))
 
-    response = answer_question("   ", client, dataset)
+    response = answer_question("   ", agent, dataset)
 
     assert response.unsupported is True
-    assert client.seen == []
+    assert model.calls == 0
 
 
 # --- explainability ---------------------------------------------------------
@@ -243,6 +304,46 @@ def test_every_supported_answer_carries_full_explainability(
     assert "exception" in explain.metric_basis.inclusion_rule
     assert "group by carrier" in explain.query_plan
     assert explain.result_preview.row_count == 9
+
+
+def test_runtime_is_measured_and_attributed_to_the_model(
+    dataset: pd.DataFrame,
+) -> None:
+    """The panel reports how long the run took, split model vs computation."""
+
+    class SlowModel(ScriptedChatModel):
+        def _generate(self, messages, stop=None, run_manager=None, **kwargs):  # noqa: ANN001
+            sleep(0.05)
+            return super()._generate(messages, stop, run_manager, **kwargs)
+
+    model = SlowModel(
+        script=script_for(
+            ToolCall(QUERY_TOOL, {"metric": "delay_rate", "dimensions": ["carrier"]})
+        )
+    )
+
+    response = answer_question("Delay rate by carrier", build_agent(model), dataset)
+    runtime = response.explainability.runtime
+
+    assert runtime is not None
+    assert runtime.model_ms >= 50
+    assert runtime.total_ms >= runtime.model_ms
+    assert runtime.compute_ms == pytest.approx(
+        runtime.total_ms - runtime.model_ms, abs=0.2
+    )
+
+
+def test_unsupported_answers_carry_no_runtime(dataset: pd.DataFrame) -> None:
+    """Runtime rides on explainability, which a refusal does not have."""
+
+    response = ask(
+        "Why are we losing money?",
+        ToolCall(DECLINE_TOOL, {"reason": "profit is not in this dataset"}),
+        dataset,
+    )
+
+    assert response.unsupported
+    assert response.explainability is None
 
 
 def test_avg_delivery_time_basis_differs_from_delivered_orders(

@@ -147,8 +147,40 @@ export interface HistoryTurn {
   answer: string;
 }
 
+/** One computed block: the figures behind a single tool call. */
+export interface AskResult {
+  answer: string;
+  chart: ChartSpec | null;
+  table: QueryResult | null;
+  explainability: Explainability;
+}
+
+/** One entry of the agent's own to-do list. */
+export interface PlanStep {
+  content: string;
+  status: "pending" | "in_progress" | "completed";
+}
+
 export interface AskResponse {
   answer: string;
+  /**
+   * One block per tool call the agent made, in order. This is the source of
+   * truth; `chart`, `table` and `explainability` are server-computed views of
+   * the first block, kept so older callers keep working.
+   */
+  results: AskResult[];
+  /** The agent's plan, when it wrote one. Empty for direct answers. */
+  plan: PlanStep[];
+  /**
+   * How `answer` was produced. "composed" means the server wrote every word;
+   * "model" means the agent's prose passed the check that every number in it
+   * came from a tool result.
+   */
+  narration: "composed" | "model";
+  /** Send this back with the next question to continue the conversation. */
+  thread_id: string | null;
+  /** True when the agent replied in prose because no tool applied. */
+  narrated: boolean;
   chart: ChartSpec | null;
   table: QueryResult | null;
   explainability: Explainability | null;

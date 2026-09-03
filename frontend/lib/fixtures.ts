@@ -1,4 +1,4 @@
-import type { AskResponse, MetricName, QueryResult } from "./types";
+import type { AskResponse, AskResult, MetricName, QueryResult } from "./types";
 
 export const GROUND_TRUTH: Record<MetricName, number> = {
   total_orders: 400,
@@ -50,7 +50,7 @@ export function fixtureQueryResult(metric: MetricName, dimensions: string[]): Qu
   };
 }
 
-export const ASK_RESPONSE_FIXTURE: AskResponse = {
+const CARRIER_ASK_RESULT: AskResult = {
   answer: "FedEx has the highest delay rate at 18.2%.",
   chart: {
     type: "bar",
@@ -89,6 +89,20 @@ export const ASK_RESPONSE_FIXTURE: AskResponse = {
     forecast_details: null,
     runtime: { total_ms: 1840.5, model_ms: 1712.3, compute_ms: 128.2 },
   },
+};
+
+export const ASK_RESPONSE_FIXTURE: AskResponse = {
+  answer: CARRIER_ASK_RESULT.answer,
+  // One block per tool call. The legacy views below mirror the first block,
+  // exactly as the server computes them.
+  results: [CARRIER_ASK_RESULT],
+  plan: [],
+  narration: "composed",
+  thread_id: "ask-fixture",
+  narrated: false,
+  chart: CARRIER_ASK_RESULT.chart,
+  table: CARRIER_ASK_RESULT.table,
+  explainability: CARRIER_ASK_RESULT.explainability,
   unsupported: false,
   unsupported_reason: null,
 };

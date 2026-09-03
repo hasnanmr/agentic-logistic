@@ -79,12 +79,54 @@ Backend (`.env`):
 | `LLM_BASE_URL` | LLM API base URL | `https://openrouter.ai/api/v1` |
 | `LLM_API_KEY` | LLM API key | (required) |
 | `LLM_MODEL` | LLM model identifier | `openai/gpt-5.6-luna` |
+| `ASK_NARRATION` | `composed` (server writes the answer) or `verified` (agent writes it, every number checked) | `composed` |
 | `DATA_CSV_PATH` | Path to logistics CSV data | `mock_logistics_data.csv` |
 | `FRONTEND_ORIGIN` | Origin allowed by CORS | `http://localhost:3001` |
 
 The provider is any OpenAI-compatible chat-completions endpoint. `LLM_MODEL`
 must match what that endpoint expects — OpenRouter ids carry a provider prefix
 (`openai/gpt-5.6-luna`), `api.openai.com` ids do not.
+
+## The Ask Operations agent
+
+Ask Operations runs on [deepagents](https://docs.langchain.com/oss/python/deepagents/overview),
+so one question can drive several tool calls: the agent plans with
+`write_todos`, calls a tool, reads the result, corrects arguments a schema
+rejected, calls again for a second figure, and can delegate open-ended
+diagnosis to a subagent.
+
+What it cannot do is see data or invent a figure. The tools compute the answer
+and file it for the user, then return the agent a **receipt** — which result
+was stored and what shape it has, never a value:
+
+```
+Stored result 1: delay_rate by carrier, 9 group(s).
+```
+
+So the model's context never holds a row of the dataset, and `answer` is
+written by application code from the computed results (`ASK_NARRATION=composed`).
+Set `ASK_NARRATION=verified` to let the agent write the prose instead; it is
+printed only if every number in it traces back to a computed result, and
+otherwise the composed text is used.
+
+| Module | Role |
+|--------|------|
+| `backend/agent.py` | Agent assembly, **system prompts**, call limits, subagents, conversation threads |
+| `backend/agent_tools.py` | The three tools (`query_tool`, `forecast_tool`, `decline_tool`) and the run collector |
+| `backend/answers.py` | Composes answer prose and explainability from computed results |
+| `backend/grounding.py` | Checks that every number in a narration came from a tool |
+| `backend/orchestrator.py` | Runs the agent and assembles the `AskResponse` |
+| `backend/llm.py` | Chat-model construction and credentials |
+
+`POST /api/ask` returns one `results` block per tool call. `chart`, `table` and
+`explainability` remain as read-only views of the first block, so a
+single-result client needs no change. The response also carries `thread_id`:
+send it back with the next question and the server continues the conversation
+from its checkpointer instead of relying on replayed `history`.
+
+Threads live in process memory, bounded to the 200 most recent, so a restart or
+a second replica loses them — clients should keep sending `history` as the
+fallback.
 
 Frontend (`frontend/.env.local`):
 

@@ -51,11 +51,21 @@ export function runQuery(request: QueryStructuredRequest): Promise<QueryResult> 
   return post<QueryResult>("/api/query", request);
 }
 
-export function askQuestion(question: string, history: HistoryTurn[] = []): Promise<AskResponse> {
+/**
+ * Ask a question, continuing `threadId` when one is known.
+ *
+ * With a thread the server holds the conversation, so `history` is only a
+ * fallback for the first turn and for a server that has forgotten the thread.
+ */
+export function askQuestion(
+  question: string,
+  history: HistoryTurn[] = [],
+  threadId: string | null = null,
+): Promise<AskResponse> {
   if (DATA_MODE === "fixtures") {
     return Promise.resolve(ASK_RESPONSE_FIXTURE);
   }
-  return post<AskResponse>("/api/ask", { question, history });
+  return post<AskResponse>("/api/ask", { question, history, thread_id: threadId });
 }
 
 export type { MetricName, QueryResult, QueryStructuredRequest };
