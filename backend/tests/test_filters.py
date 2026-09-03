@@ -8,7 +8,7 @@ expectation from the real dataset.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import pandas as pd
 import pytest
@@ -165,3 +165,52 @@ def test_malformed_dates_are_reported_against_their_column(
 
     with pytest.raises(DatasetError, match="order_date.*not %Y-%m-%d dates"):
         load_dataset(path)
+
+
+def test_a_delivery_before_its_order_is_rejected(
+    dataset: pd.DataFrame, tmp_path
+) -> None:
+    """A reversed pair parses fine, so only an explicit guard catches it.
+
+    Left unchecked it yields a negative elapsed time, which does not raise -
+    it quietly drags Average Delivery Time down.
+    """
+
+    tampered = dataset.head(3).copy()
+    # Stepped back with stdlib arithmetic: numpy timedelta units are
+    # mid-deprecation and this test is not about pandas date maths.
+    first = tampered.index[0]
+    ordered_on = tampered.loc[first, "order_date"].date()
+    tampered.loc[first, "delivery_date"] = pd.Timestamp(
+        ordered_on - timedelta(days=9)
+    )
+    path = tmp_path / "reversed_dates.csv"
+    tampered.to_csv(path, index=False)
+
+    with pytest.raises(DatasetError, match="1 rows whose delivery_date precedes"):
+        load_dataset(path)
+
+
+def test_a_same_day_delivery_is_accepted(dataset: pd.DataFrame, tmp_path) -> None:
+    """The guard rejects reversal, not a zero-day delivery."""
+
+    tampered = dataset.head(3).copy()
+    tampered["delivery_date"] = tampered["order_date"]
+    path = tmp_path / "same_day.csv"
+    tampered.to_csv(path, index=False)
+
+    assert len(load_dataset(path)) == 3
+
+
+def test_orders_without_a_delivery_date_pass_the_ordering_guard(
+    dataset: pd.DataFrame, tmp_path
+) -> None:
+    """NaT compares False, so an undelivered order is not a reversed one."""
+
+    tampered = dataset.head(3).copy()
+    tampered["delivery_date"] = pd.NaT
+    tampered["status"] = "in_transit"
+    path = tmp_path / "undelivered.csv"
+    tampered.to_csv(path, index=False)
+
+    assert len(load_dataset(path)) == 3
