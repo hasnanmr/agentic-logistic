@@ -12,18 +12,24 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import ChartTooltip from "./ChartTooltip";
 import type { ChartSpec, Scalar } from "@/lib/types";
 
 interface AskChartProps {
   chart: ChartSpec;
 }
 
-const PALETTE = ["#2563eb", "#16a34a", "#f59e0b", "#dc2626", "#7c3aed", "#0891b2"];
+// Mirrors the brand tokens in globals.css - recharts renders raw SVG
+// attributes, which don't reliably resolve CSS custom properties.
+const BRAND_600 = "#4b00f9";
+const BRAND_500 = "#6a2bfb";
+const BRAND_300 = "#b39dfa";
+const GRIDLINE = "#ece7f8";
+const AXIS_INK = "#8a86a3";
+const PALETTE = [BRAND_500, "#233caf", "#17b07a", "#ec835a", "#7c3aed", "#0891b2"];
 
 /** The field `chart_rules.forecast_chart` uses to label each point. */
 const SERIES_FIELD = "series";
-const ACTUAL_COLOR = "#2563eb";
-const FORECAST_COLOR = "#f59e0b";
 
 type ForecastPoint = Record<string, Scalar>;
 
@@ -71,13 +77,13 @@ export default function AskChart({ chart }: AskChartProps) {
       <ResponsiveContainer width="100%" height={280}>
         {chart.type === "line" ? (
           <LineChart data={lineData} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-            <XAxis dataKey={chart.x} tick={{ fontSize: 12 }} />
-            <YAxis tick={{ fontSize: 12 }} />
-            <Tooltip />
+            <CartesianGrid strokeDasharray="3 3" stroke={GRIDLINE} vertical={false} />
+            <XAxis dataKey={chart.x} tick={{ fontSize: 12, fill: AXIS_INK }} axisLine={{ stroke: GRIDLINE }} tickLine={false} />
+            <YAxis tick={{ fontSize: 12, fill: AXIS_INK }} axisLine={false} tickLine={false} allowDecimals={false} />
+            <Tooltip content={<ChartTooltip />} cursor={{ stroke: BRAND_300, strokeWidth: 1 }} />
             {/* Recharts reads its children to build the chart, so these stay
                 as a flat list rather than a wrapping fragment. */}
-            {forecastMode ? <Legend /> : null}
+            {forecastMode ? <Legend iconType="plainline" wrapperStyle={{ fontSize: 12, color: AXIS_INK }} /> : null}
             {forecastMode ? (
               [
                 <Line
@@ -85,9 +91,10 @@ export default function AskChart({ chart }: AskChartProps) {
                   name="Actual"
                   type="monotone"
                   dataKey="actual"
-                  stroke={ACTUAL_COLOR}
+                  stroke={BRAND_600}
                   strokeWidth={2}
                   dot={false}
+                  activeDot={{ r: 5, stroke: "#ffffff", strokeWidth: 2 }}
                   connectNulls={false}
                 />,
                 <Line
@@ -95,10 +102,11 @@ export default function AskChart({ chart }: AskChartProps) {
                   name="Forecast"
                   type="monotone"
                   dataKey="forecast"
-                  stroke={FORECAST_COLOR}
+                  stroke={BRAND_300}
                   strokeWidth={2}
                   strokeDasharray="5 4"
-                  dot={{ r: 3, fill: FORECAST_COLOR }}
+                  dot={{ r: 3, fill: BRAND_300, strokeWidth: 0 }}
+                  activeDot={{ r: 5, stroke: "#ffffff", strokeWidth: 2 }}
                   connectNulls={false}
                 />,
               ]
@@ -111,22 +119,25 @@ export default function AskChart({ chart }: AskChartProps) {
                   stroke={PALETTE[index % PALETTE.length]}
                   strokeWidth={2}
                   dot={false}
+                  activeDot={{ r: 5, stroke: "#ffffff", strokeWidth: 2 }}
                 />
               ))
             )}
           </LineChart>
         ) : (
           <BarChart data={chart.data} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-            <XAxis dataKey={chart.x} tick={{ fontSize: 12 }} />
-            <YAxis tick={{ fontSize: 12 }} />
-            <Tooltip />
+            <CartesianGrid strokeDasharray="3 3" stroke={GRIDLINE} vertical={false} />
+            <XAxis dataKey={chart.x} tick={{ fontSize: 12, fill: AXIS_INK }} axisLine={{ stroke: GRIDLINE }} tickLine={false} />
+            <YAxis tick={{ fontSize: 12, fill: AXIS_INK }} axisLine={false} tickLine={false} allowDecimals={false} />
+            <Tooltip content={<ChartTooltip />} cursor={{ fill: "rgba(75, 0, 249, 0.06)" }} />
             {seriesKeys.map((key, index) => (
               <Bar
                 key={key}
                 dataKey={key}
                 fill={PALETTE[index % PALETTE.length]}
                 radius={[4, 4, 0, 0]}
+                maxBarSize={48}
+                activeBar={{ fillOpacity: 0.85 }}
               />
             ))}
           </BarChart>
@@ -134,8 +145,4 @@ export default function AskChart({ chart }: AskChartProps) {
       </ResponsiveContainer>
     </div>
   );
-}
-
-export function chartValue(data: Record<string, Scalar>, key: string): Scalar {
-  return data[key] ?? null;
 }

@@ -1,4 +1,4 @@
-import type { RequestFilter, Scalar } from "./types";
+import type { RequestFilter } from "./types";
 
 export interface DashboardFilters {
   start: string;
@@ -26,16 +26,4 @@ export function describeFilters(filters: DashboardFilters): string[] {
   if (filters.carrier) parts.push(`carrier ${filters.carrier}`);
   if (filters.region) parts.push(`region ${filters.region}`);
   return parts;
-}
-
-export function formatCount(value: Scalar): string {
-  return value === null ? "N/A" : new Intl.NumberFormat("en-US").format(Number(value));
-}
-
-export function formatPercent(value: Scalar): string {
-  return value === null ? "N/A" : `${Number(value).toFixed(2)}%`;
-}
-
-export function formatDays(value: Scalar): string {
-  return value === null ? "N/A" : `${Number(value).toFixed(2)} days`;
 }

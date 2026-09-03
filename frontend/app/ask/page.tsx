@@ -5,7 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import AskChart from "../components/AskChart";
 import DataTable from "../components/DataTable";
 import EmptyState from "../components/EmptyState";
-import ExplainabilityPanel from "../components/ExplainabilityPanel";
+import { SendIcon, SparkleIcon } from "../components/icons";
+import TraceSidebar from "../components/TraceSidebar";
 import { askQuestion } from "@/lib/api";
 import { ASK_RESPONSE_FIXTURE } from "@/lib/fixtures";
 import { ApiError, type AskResponse, type HistoryTurn } from "@/lib/types";
@@ -30,6 +31,7 @@ export default function AskPage() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [traceIndex, setTraceIndex] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const turns: HistoryTurn[] = messages
@@ -93,6 +95,9 @@ export default function AskPage() {
         <div className="chat-scroll">
           {messages.length === 0 ? (
             <div className="chat-empty">
+              <span className="chat-empty-icon" aria-hidden="true">
+                <SparkleIcon />
+              </span>
               <p>Ask a question to start the conversation.</p>
               <div className="ask-examples">
                 {EXAMPLE_QUESTIONS.map((example) => (
@@ -110,6 +115,11 @@ export default function AskPage() {
           ) : (
             messages.map((message, index) => (
               <div key={index} className={`chat-row chat-row-${message.role}`}>
+                {message.role === "assistant" ? (
+                  <span className="chat-avatar chat-avatar-assistant" aria-hidden="true">
+                    <SparkleIcon className="chat-avatar-icon" />
+                  </span>
+                ) : null}
                 <div className={`chat-bubble chat-bubble-${message.role}${message.isError ? " chat-bubble-error" : ""}`}>
                   {message.role === "user" ? (
                     <p className="chat-text">{message.text}</p>
@@ -130,7 +140,17 @@ export default function AskPage() {
                         <DataTable result={message.response.table} />
                       ) : null}
                       {message.response?.explainability ? (
-                        <ExplainabilityPanel explainability={message.response.explainability} />
+                        <button
+                          type="button"
+                          className={`trace-open-button${traceIndex === index ? " is-active" : ""}`}
+                          onClick={() =>
+                            setTraceIndex((current) => (current === index ? null : index))
+                          }
+                          aria-expanded={traceIndex === index}
+                        >
+                          <span className="trace-open-icon" aria-hidden="true" />
+                          {traceIndex === index ? "Hide how this answer was produced" : "How this answer was produced"}
+                        </button>
                       ) : null}
                     </>
                   )}
@@ -138,7 +158,20 @@ export default function AskPage() {
               </div>
             ))
           )}
-          {loading ? <p className="loading chat-loading">Thinking…</p> : null}
+          {loading ? (
+            <div className="chat-row chat-row-assistant">
+              <span className="chat-avatar chat-avatar-assistant" aria-hidden="true">
+                <SparkleIcon className="chat-avatar-icon" />
+              </span>
+              <div className="chat-bubble chat-bubble-assistant" aria-live="polite" aria-label="Thinking">
+                <span className="typing-dots">
+                  <span />
+                  <span />
+                  <span />
+                </span>
+              </div>
+            </div>
+          ) : null}
           <div ref={bottomRef} />
         </div>
 
@@ -171,11 +204,24 @@ export default function AskPage() {
             onChange={(event) => setInput(event.target.value)}
             aria-label="Your question"
           />
-          <button type="submit" className="button-primary" disabled={limitReached || loading || !input.trim()}>
-            {loading ? "Asking…" : "Ask"}
+          <button
+            type="submit"
+            className="button-primary ask-send"
+            disabled={limitReached || loading || !input.trim()}
+            aria-label={loading ? "Asking…" : "Ask"}
+          >
+            <SendIcon />
           </button>
         </form>
       </section>
+
+      <TraceSidebar
+        open={traceIndex !== null}
+        explainability={
+          traceIndex === null ? null : messages[traceIndex]?.response?.explainability ?? null
+        }
+        onClose={() => setTraceIndex(null)}
+      />
     </main>
   );
 }

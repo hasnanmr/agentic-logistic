@@ -14,7 +14,10 @@ export default function Nav() {
   return (
     <header className="nav">
       <div className="nav-inner">
-        <span className="nav-brand">AI Logistics Analytics</span>
+        <span className="nav-brand">
+          <span className="nav-mark" />
+          AI Logistics Analytics
+        </span>
         <nav className="nav-links">
           {LINKS.map((link) => (
             <Link

@@ -14,18 +14,18 @@ import {
   YAxis,
 } from "recharts";
 
+import ChartTooltip from "./components/ChartTooltip";
 import DataTable from "./components/DataTable";
 import EmptyState from "./components/EmptyState";
 import FilterBar from "./components/FilterBar";
 import KpiCard from "./components/KpiCard";
+import { AlertTriangleIcon, CheckCircleIcon, ClockIcon, GaugeIcon, PackageIcon } from "./components/icons";
+import { ChartSkeleton, KpiSkeletonRow, Skeleton } from "./components/Skeleton";
 import { runQuery } from "@/lib/api";
 import {
   buildRequestFilters,
   describeFilters,
   EMPTY_FILTERS,
-  formatCount,
-  formatDays,
-  formatPercent,
   type DashboardFilters,
 } from "@/lib/format";
 import { ApiError, type QueryStructuredRequest, type Scalar } from "@/lib/types";
@@ -49,6 +49,14 @@ interface CarrierRow {
 }
 
 const CHART_LIMIT = 100;
+
+// Mirrors globals.css's status tokens - recharts renders raw SVG attributes,
+// which don't reliably resolve CSS custom properties.
+const BRAND_600 = "#4b00f9";
+const STATUS_GOOD = "#0ca30c";
+const STATUS_CRITICAL = "#d03b3b";
+const GRIDLINE = "#ece7f8";
+const AXIS_INK = "#8a86a3";
 
 function scalarQuery(metric: QueryStructuredRequest["metric"], filters: QueryStructuredRequest["filters"]): QueryStructuredRequest {
   return { operation: "query", metric, filters, limit: 1 };
@@ -215,12 +223,23 @@ export default function DashboardPage() {
     void loadDashboard();
   }, [loadDashboard]);
 
+  const isFirstLoad = loading && !kpis;
   const isEmpty = (kpis?.total ?? 0) === 0;
 
+  // `delivered` already includes delayed orders (on-time + delayed together
+  // form the Delivered population - see backend/status_rules.py), so the
+  // Average Delivery Time basis is delivered + exception, not delivered +
+  // delayed + exception (that would double-count the delayed group).
   const avgBasis =
-    kpis && kpis.delivered !== null && kpis.delayed !== null && kpis.exceptionCount !== null
-      ? `n=${Number(kpis.delivered) + Number(kpis.delayed) + Number(kpis.exceptionCount)}, incl. exception`
+    kpis && kpis.delivered !== null && kpis.exceptionCount !== null
+      ? `n=${Number(kpis.delivered) + Number(kpis.exceptionCount)}, incl. exception`
       : undefined;
+
+  const stackedByCarrier = carrierRows.map((row) => ({
+    carrier: row.carrier,
+    "On-time": row.delivered - row.delayed,
+    Delayed: row.delayed,
+  }));
 
   return (
     <main className="page">
@@ -233,25 +252,58 @@ export default function DashboardPage() {
 
       {error ? <div className="error-banner">{error}</div> : null}
 
-      {loading && !kpis ? <p className="loading">Loading metrics…</p> : null}
-
-      {kpis ? (
-        <section className="kpi-grid" aria-label="Key performance indicators">
-          <KpiCard label="Total Orders" value={formatCount(kpis.total)} />
-          <KpiCard label="Delivered Orders" value={formatCount(kpis.delivered)} basis="on time + delayed" />
-          <KpiCard label="Delayed Orders" value={formatCount(kpis.delayed)} />
-          <KpiCard label="On-Time Rate" value={formatPercent(kpis.onTimeRate)} />
-          <KpiCard label="Delay Rate" value={formatPercent(kpis.delayRate)} />
-          <KpiCard label="Average Delivery Time" value={formatDays(kpis.avgDeliveryTime)} basis={avgBasis} />
+      {isFirstLoad ? (
+        <KpiSkeletonRow />
+      ) : kpis ? (
+        <section
+          className="kpi-grid"
+          aria-label="Key performance indicators"
+          style={{ opacity: loading ? 0.6 : 1, transition: "opacity 0.2s ease" }}
+        >
+          <KpiCard label="Total Orders" value={kpis.total} kind="count" icon={<PackageIcon />} />
+          <KpiCard
+            label="Delivered Orders"
+            value={kpis.delivered}
+            kind="count"
+            icon={<CheckCircleIcon />}
+            tone="info"
+            basis="on time + delayed"
+          />
+          <KpiCard
+            label="Delayed Orders"
+            value={kpis.delayed}
+            kind="count"
+            icon={<AlertTriangleIcon />}
+            tone="critical"
+          />
+          <KpiCard label="On-Time Rate" value={kpis.onTimeRate} kind="percent" icon={<GaugeIcon />} tone="good" />
+          <KpiCard label="Delay Rate" value={kpis.delayRate} kind="percent" icon={<GaugeIcon />} tone="critical" />
+          <KpiCard
+            label="Average Delivery Time"
+            value={kpis.avgDeliveryTime}
+            kind="days"
+            icon={<ClockIcon />}
+            tone="info"
+            basis={avgBasis}
+          />
         </section>
       ) : null}
 
-      {isEmpty && !loading ? (
+      {isFirstLoad ? (
+        <>
+          <ChartSkeleton />
+          <ChartSkeleton />
+          <Skeleton className="skeleton-chart" />
+        </>
+      ) : isEmpty && !loading ? (
         <EmptyState activeFilters={activeFilters} onReset={() => setFilters({ ...EMPTY_FILTERS })} />
       ) : (
-        <>
+        <div style={{ opacity: loading ? 0.6 : 1, transition: "opacity 0.2s ease", display: "flex", flexDirection: "column", gap: "1.4rem" }}>
           <section className="panel">
-            <h2 className="panel-title">Order volume by week</h2>
+            <div className="panel-header">
+              <h2 className="panel-title">Order volume by week</h2>
+              <p className="panel-hint">Hover a point for the exact count</p>
+            </div>
             {weekly.length === 0 ? (
               <EmptyState activeFilters={activeFilters} />
             ) : (
@@ -260,20 +312,28 @@ export default function DashboardPage() {
                   <AreaChart data={weekly} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
                     <defs>
                       <linearGradient id="volumeFill" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#2563eb" stopOpacity={0.35} />
-                        <stop offset="100%" stopColor="#2563eb" stopOpacity={0.05} />
+                        <stop offset="0%" stopColor={BRAND_600} stopOpacity={0.28} />
+                        <stop offset="100%" stopColor={BRAND_600} stopOpacity={0.02} />
                       </linearGradient>
                     </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis dataKey="week" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
-                    <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
-                    <Tooltip />
+                    <CartesianGrid strokeDasharray="3 3" stroke={GRIDLINE} vertical={false} />
+                    <XAxis
+                      dataKey="week"
+                      tick={{ fontSize: 11, fill: AXIS_INK }}
+                      interval="preserveStartEnd"
+                      axisLine={{ stroke: GRIDLINE }}
+                      tickLine={false}
+                    />
+                    <YAxis tick={{ fontSize: 12, fill: AXIS_INK }} allowDecimals={false} axisLine={false} tickLine={false} />
+                    <Tooltip content={<ChartTooltip />} cursor={{ stroke: BRAND_600, strokeWidth: 1, strokeOpacity: 0.3 }} />
                     <Area
+                      name="Orders"
                       type="monotone"
                       dataKey="orders"
-                      stroke="#2563eb"
+                      stroke={BRAND_600}
                       strokeWidth={2}
                       fill="url(#volumeFill)"
+                      activeDot={{ r: 5, stroke: "#ffffff", strokeWidth: 2, fill: BRAND_600 }}
                     />
                   </AreaChart>
                 </ResponsiveContainer>
@@ -282,27 +342,33 @@ export default function DashboardPage() {
           </section>
 
           <section className="panel">
-            <h2 className="panel-title">On-time vs delayed by carrier</h2>
+            <div className="panel-header">
+              <h2 className="panel-title">On-time vs delayed by carrier</h2>
+              <p className="panel-hint">Hover a segment to break it down</p>
+            </div>
             {carrierRows.length === 0 ? (
               <EmptyState activeFilters={activeFilters} />
             ) : (
               <div className="chart-container">
                 <ResponsiveContainer width="100%" height={280}>
-                  <BarChart
-                    data={carrierRows.map((row) => ({
-                      carrier: row.carrier,
-                      "On-time": row.delivered - row.delayed,
-                      Delayed: row.delayed,
-                    }))}
-                    margin={{ top: 8, right: 16, bottom: 8, left: 0 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis dataKey="carrier" tick={{ fontSize: 11 }} />
-                    <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
-                    <Tooltip />
-                    <Legend />
-                    <Bar dataKey="On-time" stackId="status" fill="#16a34a" />
-                    <Bar dataKey="Delayed" stackId="status" fill="#dc2626" radius={[4, 4, 0, 0]} />
+                  <BarChart data={stackedByCarrier} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={GRIDLINE} vertical={false} />
+                    <XAxis dataKey="carrier" tick={{ fontSize: 11, fill: AXIS_INK }} axisLine={{ stroke: GRIDLINE }} tickLine={false} />
+                    <YAxis tick={{ fontSize: 12, fill: AXIS_INK }} allowDecimals={false} axisLine={false} tickLine={false} />
+                    <Tooltip content={<ChartTooltip />} cursor={{ fill: "rgba(75, 0, 249, 0.05)" }} />
+                    <Legend
+                      wrapperStyle={{ fontSize: 12, color: AXIS_INK }}
+                      formatter={(value) => <span style={{ color: "var(--ink-secondary)" }}>{value}</span>}
+                    />
+                    <Bar dataKey="On-time" name="On-time" stackId="status" fill={STATUS_GOOD} maxBarSize={28} />
+                    <Bar
+                      dataKey="Delayed"
+                      name="Delayed"
+                      stackId="status"
+                      fill={STATUS_CRITICAL}
+                      radius={[4, 4, 0, 0]}
+                      maxBarSize={28}
+                    />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -310,7 +376,10 @@ export default function DashboardPage() {
           </section>
 
           <section className="panel">
-            <h2 className="panel-title">Carrier performance</h2>
+            <div className="panel-header">
+              <h2 className="panel-title">Carrier performance</h2>
+              <p className="panel-hint">Click a column to sort</p>
+            </div>
             {carrierRows.length === 0 ? (
               <EmptyState activeFilters={activeFilters} />
             ) : (
@@ -332,7 +401,7 @@ export default function DashboardPage() {
               />
             )}
           </section>
-        </>
+        </div>
       )}
     </main>
   );
