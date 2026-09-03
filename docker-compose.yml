@@ -1,0 +1,33 @@
+services:
+  backend:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      APP_USERNAME: ${APP_USERNAME:-reviewer}
+      APP_PASSWORD: ${APP_PASSWORD:-change-me}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://openrouter.ai/api/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-openai/gpt-5.6-luna}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3001}
+      DATA_CSV_PATH: /app/mock_logistics_data.csv
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
+        NEXT_PUBLIC_API_USERNAME: ${APP_USERNAME:-reviewer}
+        NEXT_PUBLIC_API_PASSWORD: ${APP_PASSWORD:-change-me}
+        NEXT_PUBLIC_DATA_MODE: api
+    ports:
+      - "3001:3001"
+    depends_on:
+      backend:
+        condition: service_healthy

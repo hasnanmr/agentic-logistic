@@ -1,0 +1,20 @@
+# Python
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+.coverage
+
+# Frontend (has its own build context)
+frontend/
+
+# Local environment and tooling
+.env
+.env.local
+.git/
+.DS_Store
+
+# Docs and media not needed at runtime
+*.docx
+*.pdf
+README_NOTES.md

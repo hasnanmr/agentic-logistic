@@ -1,0 +1,26 @@
+# Python
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+.coverage
+
+# Next.js / Node
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/tsconfig.tsbuildinfo
+
+# Local environment and tooling
+.env
+.env.local
+.DS_Store
+
+# Docker
+docker-compose.override.yml
+
+# Source specification documents - kept locally only. The Markdown versions
+# (logistics-spec.md, Task_Breakdown_MVP.md) are the ones that ship.
+AI_Logistics_Analytics_PRD.docx
+AI_Logistics_Analytics_PRD_v1.0_backup.docx
+logistics-spec.pdf
