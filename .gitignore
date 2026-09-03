@@ -13,7 +13,8 @@ frontend/tsconfig.tsbuildinfo
 
 # Local environment and tooling
 .env
-.env.local
+.env.*
+!.env.example
 .DS_Store
 
 # Docker
