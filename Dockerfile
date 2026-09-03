@@ -14,7 +14,11 @@ COPY mock_logistics_data.csv ./
 
 RUN uv sync --frozen --no-dev
 
-ENV APP_PORT=8081
-EXPOSE 8081
+# PORT is read at container start, not build time - Railway (and most PaaS
+# hosts) assign it dynamically, so the CMD must expand it rather than bake in
+# a fixed value. The default keeps `docker run` and docker-compose working
+# unchanged when nothing overrides it.
+ENV PORT=8080
+EXPOSE 8080
 
-CMD ["uv", "run", "--no-dev", "uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8081"]
+CMD ["sh", "-c", "uv run --no-dev uvicorn backend.main:app --host 0.0.0.0 --port ${PORT}"]

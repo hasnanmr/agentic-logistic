@@ -116,6 +116,43 @@ docker build -t logistics-backend .
 docker run -p 8080:8080 --env-file .env logistics-backend
 ```
 
+## Deployment (Railway)
+
+Both services deploy from this one repo as two services inside one Railway
+project ("environment"), each built from its own `Dockerfile` via the
+matching `railway.json` (`/railway.json` for the backend, `frontend/railway.json`
+for the frontend). Railway assigns each service its own `PORT` at runtime;
+both Dockerfiles already read it dynamically instead of hardcoding one.
+
+1. **Create the project.** [railway.com](https://railway.com) → New Project →
+   Deploy from GitHub repo → select this repo.
+2. **Backend service.** Add a service from the same repo, Root Directory `/`.
+   Railway detects `railway.json` and builds `Dockerfile` automatically. Set
+   these Variables on the service (Settings → Variables):
+   - `APP_USERNAME`, `APP_PASSWORD` — reviewer credentials
+   - `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` — see the table above
+   - `FRONTEND_ORIGIN` — filled in after step 4 below
+   Then Settings → Networking → **Generate Domain** to get a public URL
+   (`https://<backend>.up.railway.app`).
+3. **Frontend service.** Add a second service from the same repo, Root
+   Directory `/frontend`. It picks up `frontend/railway.json` and builds
+   `frontend/Dockerfile`. Set these build-time Variables (the Dockerfile
+   declares them as `ARG`s, so Railway bakes them into the client bundle):
+   - `NEXT_PUBLIC_API_BASE_URL` — the backend's public URL from step 2
+   - `NEXT_PUBLIC_API_USERNAME`, `NEXT_PUBLIC_API_PASSWORD` — match step 2
+   - `NEXT_PUBLIC_DATA_MODE=api`
+   Then Settings → Networking → Generate Domain for the frontend too.
+4. **Close the loop.** Go back to the backend service and set
+   `FRONTEND_ORIGIN` to the frontend's public URL from step 3, then redeploy
+   the backend so CORS allows it. (This order — backend domain, then
+   frontend, then back to backend — exists because each origin needs the
+   other's URL, which doesn't exist until it deploys once.)
+
+Both services redeploy automatically on every push to `main`. Railway does
+not read `docker-compose.yml`; it's kept for local multi-service runs (`docker
+compose up`) only, and stays in sync with `Dockerfile` by using the same
+default `PORT=8080` when nothing overrides it.
+
 ## Makefile Commands
 
 ```bash
