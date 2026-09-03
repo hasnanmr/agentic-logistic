@@ -185,7 +185,7 @@ def forecast_explainability(
             filters=request.filters,
         ),
         query_plan=(
-            "aggregate orders per complete ISO week -> 4-week moving average -> "
+            "aggregate orders per complete ISO week -> fit a 12-week trend -> "
             f"project {result.horizon_weeks} week(s) -> compare with the trailing "
             "baseline"
         ),

@@ -236,7 +236,7 @@ class ForecastResult(ContractModel):
     history: list[ForecastPoint]
     history_window: HistoryWindow
     forecast: list[ForecastPoint]
-    method: Literal["moving_average_4w"]
+    method: Literal["linear_trend_12w"]
     methodology_note: str
     recommendation: ForecastRecommendation | None
     insufficient_data: bool = False
@@ -275,7 +275,7 @@ class ResolvedFilters(ContractModel):
 
 class ForecastDetails(ContractModel):
     horizon_weeks: Annotated[StrictInt, Field(ge=1, le=8)]
-    method: Literal["moving_average_4w"]
+    method: Literal["linear_trend_12w"]
     history_window: HistoryWindow
     baseline_weekly_orders: float | None
     forecast_level: float | None
