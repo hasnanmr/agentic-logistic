@@ -87,6 +87,7 @@ export const ASK_RESPONSE_FIXTURE: AskResponse = {
     query_plan: "group by carrier -> compute delay_rate -> sort desc -> limit 10",
     result_preview: CARRIER_RESULT_FIXTURE,
     forecast_details: null,
+    runtime: { total_ms: 1840.5, model_ms: 1712.3, compute_ms: 128.2 },
   },
   unsupported: false,
   unsupported_reason: null,

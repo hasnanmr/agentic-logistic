@@ -114,6 +114,12 @@ export interface ForecastDetails {
   insufficient_data: boolean;
 }
 
+export interface Runtime {
+  total_ms: number;
+  model_ms: number;
+  compute_ms: number;
+}
+
 export interface Explainability {
   question: string;
   structured_request: QueryStructuredRequest | ForecastStructuredRequest;
@@ -123,6 +129,7 @@ export interface Explainability {
   query_plan: string;
   result_preview: QueryResult;
   forecast_details: ForecastDetails | null;
+  runtime?: Runtime | null;
 }
 
 export interface ForecastStructuredRequest {

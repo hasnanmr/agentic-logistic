@@ -1222,6 +1222,24 @@ a {
   padding: 0.22rem 0.65rem;
 }
 
+.trace-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+/* Runtime reads as a neutral measurement, not a second status chip. */
+.trace-time-chip {
+  font-size: 0.7rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-secondary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 0.2rem 0.6rem;
+}
+
 .trace-link-button {
   background: none;
   border: none;
@@ -1580,25 +1598,6 @@ a {
   font-size: 0.82rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-}
-
-/* Structured request */
-
-.trace-code-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 0.35rem;
-}
-
-.trace-code {
-  margin: 0;
-  padding: 0.75rem 0.85rem;
-  background: var(--brand-950);
-  color: #dbeee3;
-  border-radius: var(--radius-sm);
-  font-size: 0.75rem;
-  line-height: 1.55;
-  overflow-x: auto;
 }
 
 .trace-sidebar .table-scroll {

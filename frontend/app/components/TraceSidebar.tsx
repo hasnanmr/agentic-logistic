@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import DataTable from "./DataTable";
-import type { Explainability, QueryStructuredRequest, RequestFilter } from "@/lib/types";
+import type { Explainability, RequestFilter } from "@/lib/types";
 
 interface TraceSidebarProps {
   explainability: Explainability | null;
@@ -22,15 +22,23 @@ const OPERATOR_LABELS: Record<RequestFilter["op"], string> = {
   lte: "≤",
 };
 
-const ALL_SECTIONS = ["pipeline", "metric", "time", "filters", "forecast", "preview", "request"] as const;
+const ALL_SECTIONS = [
+  "pipeline",
+  "runtime",
+  "metric",
+  "time",
+  "filters",
+  "forecast",
+  "preview",
+] as const;
 type SectionId = (typeof ALL_SECTIONS)[number];
 
-const DEFAULT_OPEN: SectionId[] = ["pipeline", "metric", "time", "filters", "forecast"];
+const DEFAULT_OPEN: SectionId[] = ["pipeline", "runtime", "metric", "time", "filters", "forecast"];
 
-function isQueryRequest(
-  request: Explainability["structured_request"],
-): request is QueryStructuredRequest {
-  return request.operation === "query";
+/** Sub-second runs read better in milliseconds; longer ones in seconds. */
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  return `${(ms / 1000).toFixed(ms < 10000 ? 2 : 1)} s`;
 }
 
 function formatFilterValue(value: RequestFilter["value"]): string {
@@ -80,7 +88,6 @@ function Section({ id, title, badge, isOpen, onToggle, children }: SectionProps)
 export default function TraceSidebar({ explainability, open, onClose }: TraceSidebarProps) {
   const [openSections, setOpenSections] = useState<SectionId[]>(DEFAULT_OPEN);
   const [activeStep, setActiveStep] = useState<number | null>(null);
-  const [copied, setCopied] = useState(false);
   const closeRef = useRef<HTMLButtonElement>(null);
   const lastFocusedRef = useRef<HTMLElement | null>(null);
 
@@ -109,16 +116,15 @@ export default function TraceSidebar({ explainability, open, onClose }: TraceSid
 
   useEffect(() => {
     setActiveStep(null);
-    setCopied(false);
     setOpenSections(DEFAULT_OPEN);
   }, [explainability]);
 
   if (!open || !explainability) return null;
 
   const { structured_request, resolved_filters, forecast_details, metric_basis } = explainability;
+  const runtime = explainability.runtime ?? null;
   const timeRange = resolved_filters.time_range;
   const filters = resolved_filters.filters;
-  const requestJson = JSON.stringify(structured_request, null, 2);
 
   function toggleSection(id: SectionId) {
     setOpenSections((current) =>
@@ -126,20 +132,12 @@ export default function TraceSidebar({ explainability, open, onClose }: TraceSid
     );
   }
 
-  const availableSections = ALL_SECTIONS.filter(
-    (id) => id !== "forecast" || forecast_details !== null,
-  );
+  const availableSections = ALL_SECTIONS.filter((id) => {
+    if (id === "forecast") return forecast_details !== null;
+    if (id === "runtime") return runtime !== null;
+    return true;
+  });
   const allOpen = availableSections.every((id) => openSections.includes(id));
-
-  async function copyRequest() {
-    try {
-      await navigator.clipboard.writeText(requestJson);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
-    } catch {
-      setCopied(false);
-    }
-  }
 
   const baseline = forecast_details?.baseline_weekly_orders ?? null;
   const level = forecast_details?.forecast_level ?? null;
@@ -175,7 +173,14 @@ export default function TraceSidebar({ explainability, open, onClose }: TraceSid
         </header>
 
         <div className="trace-toolbar">
-          <span className="trace-op-chip">{structured_request.operation}</span>
+          <span className="trace-chips">
+            <span className="trace-op-chip">{structured_request.operation}</span>
+            {runtime ? (
+              <span className="trace-time-chip" title="Total time from question to answer">
+                {formatDuration(runtime.total_ms)}
+              </span>
+            ) : null}
+          </span>
           <button
             type="button"
             className="trace-link-button"
@@ -209,6 +214,34 @@ export default function TraceSidebar({ explainability, open, onClose }: TraceSid
               ))}
             </ol>
           </Section>
+
+          {runtime ? (
+            <Section
+              id="runtime"
+              title="Runtime"
+              badge={formatDuration(runtime.total_ms)}
+              isOpen={openSections.includes("runtime")}
+              onToggle={toggleSection}
+            >
+              <p className="trace-value">
+                The agent took {formatDuration(runtime.total_ms)} from question to answer.
+              </p>
+              <div className="trace-stat-row">
+                <span className="trace-stat">
+                  <span className="trace-stat-label">Model call</span>
+                  <span className="trace-stat-value">{formatDuration(runtime.model_ms)}</span>
+                </span>
+                <span className="trace-stat">
+                  <span className="trace-stat-label">Data compute</span>
+                  <span className="trace-stat-value">{formatDuration(runtime.compute_ms)}</span>
+                </span>
+              </div>
+              <p className="trace-note">
+                Server-side wall clock: tool choice by the model, then the query or forecast run
+                here. Network time to your browser is not included.
+              </p>
+            </Section>
+          ) : null}
 
           <Section
             id="metric"
@@ -362,26 +395,6 @@ export default function TraceSidebar({ explainability, open, onClose }: TraceSid
                 ) : null}
               </>
             )}
-          </Section>
-
-          <Section
-            id="request"
-            title="Structured request"
-            isOpen={openSections.includes("request")}
-            onToggle={toggleSection}
-          >
-            <div className="trace-code-actions">
-              <button type="button" className="trace-link-button" onClick={() => void copyRequest()}>
-                {copied ? "Copied" : "Copy JSON"}
-              </button>
-            </div>
-            <pre className="trace-code">{requestJson}</pre>
-            {isQueryRequest(structured_request) && structured_request.sort ? (
-              <p className="trace-note">
-                Sorted by {structured_request.sort.by} ({structured_request.sort.direction})
-                {structured_request.limit ? `, limit ${structured_request.limit}` : ""}.
-              </p>
-            ) : null}
           </Section>
         </div>
       </aside>
