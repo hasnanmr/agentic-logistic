@@ -15,6 +15,7 @@ jobs:
   backend-tests:
     name: Backend unit tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Check out repository
@@ -31,15 +32,22 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Cache backend virtual environment
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: ${{ runner.os }}-python-3.11-uv-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+
       - name: Install backend dependencies
-        run: uv sync --locked
+        run: uv sync --locked --no-install-project
 
       - name: Run backend unit tests
-        run: uv run pytest
+        run: uv run --no-sync pytest
 
   frontend-tests:
     name: Frontend unit tests
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     defaults:
       run:
