@@ -51,12 +51,13 @@ interface CarrierRow {
 const CHART_LIMIT = 100;
 
 // Mirrors globals.css's status tokens - recharts renders raw SVG attributes,
-// which don't reliably resolve CSS custom properties.
-const BRAND_600 = "#4b00f9";
+// which don't reliably resolve CSS custom properties. Marks use a deeper mint
+// than --brand-600 for contrast against white; see AskChart for the reasoning.
+const BRAND_600 = "#0a8f52";
 const STATUS_GOOD = "#0ca30c";
 const STATUS_CRITICAL = "#d03b3b";
-const GRIDLINE = "#ece7f8";
-const AXIS_INK = "#8a86a3";
+const GRIDLINE = "#ececec";
+const AXIS_INK = "#999999";
 
 function scalarQuery(metric: QueryStructuredRequest["metric"], filters: QueryStructuredRequest["filters"]): QueryStructuredRequest {
   return { operation: "query", metric, filters, limit: 1 };

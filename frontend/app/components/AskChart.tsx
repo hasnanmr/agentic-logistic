@@ -20,13 +20,19 @@ interface AskChartProps {
 }
 
 // Mirrors the brand tokens in globals.css - recharts renders raw SVG
-// attributes, which don't reliably resolve CSS custom properties.
-const BRAND_600 = "#4b00f9";
-const BRAND_500 = "#6a2bfb";
-const BRAND_300 = "#b39dfa";
-const GRIDLINE = "#ece7f8";
-const AXIS_INK = "#8a86a3";
-const PALETTE = [BRAND_500, "#233caf", "#17b07a", "#ec835a", "#7c3aed", "#0891b2"];
+// attributes, which don't reliably resolve CSS custom properties. Marks use a
+// deeper mint than --brand-600: #17f082 is a fill color behind near-black text
+// and only reaches ~1.5:1 against white, well under the 3:1 a line or bar needs.
+const BRAND_600 = "#0a8f52";
+const GRIDLINE = "#ececec";
+const AXIS_INK = "#999999";
+// Categorical slots come from the validated dataviz order (blue, orange, aqua,
+// yellow, magenta, green), assigned in sequence and never cycled or reordered -
+// that ordering is what keeps adjacent pairs separable for colorblind readers
+// (worst adjacent CVD dE 9.1, normal-vision 19.6). Brand mint stays reserved for
+// single-series marks. Three slots sit under 3:1 on white; the table rendered
+// beside every chart is the relief that rule requires.
+const PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"];
 
 /** The field `chart_rules.forecast_chart` uses to label each point. */
 const SERIES_FIELD = "series";
@@ -80,7 +86,7 @@ export default function AskChart({ chart }: AskChartProps) {
             <CartesianGrid strokeDasharray="3 3" stroke={GRIDLINE} vertical={false} />
             <XAxis dataKey={chart.x} tick={{ fontSize: 12, fill: AXIS_INK }} axisLine={{ stroke: GRIDLINE }} tickLine={false} />
             <YAxis tick={{ fontSize: 12, fill: AXIS_INK }} axisLine={false} tickLine={false} allowDecimals={false} />
-            <Tooltip content={<ChartTooltip />} cursor={{ stroke: BRAND_300, strokeWidth: 1 }} />
+            <Tooltip content={<ChartTooltip />} cursor={{ stroke: AXIS_INK, strokeWidth: 1 }} />
             {/* Recharts reads its children to build the chart, so these stay
                 as a flat list rather than a wrapping fragment. */}
             {forecastMode ? <Legend iconType="plainline" wrapperStyle={{ fontSize: 12, color: AXIS_INK }} /> : null}
@@ -102,10 +108,10 @@ export default function AskChart({ chart }: AskChartProps) {
                   name="Forecast"
                   type="monotone"
                   dataKey="forecast"
-                  stroke={BRAND_300}
+                  stroke={BRAND_600}
                   strokeWidth={2}
                   strokeDasharray="5 4"
-                  dot={{ r: 3, fill: BRAND_300, strokeWidth: 0 }}
+                  dot={{ r: 3, fill: BRAND_600, strokeWidth: 0 }}
                   activeDot={{ r: 5, stroke: "#ffffff", strokeWidth: 2 }}
                   connectNulls={false}
                 />,

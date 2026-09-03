@@ -1,25 +1,30 @@
-/* Design tokens - brand palette inspired by spaceshipapp.com (violet + mint on
-   dark charcoal); status colors (good/warning/serious/critical) are the fixed,
-   validated dataviz set and are never re-themed to brand hues. */
+/* Design tokens - sampled from spaceshipapp.com's live stylesheet: the site is
+   white (#ffffff) and near-black (#000/#151515) with mint (#17f082) as the only
+   chromatic brand color. Violet (#4b00f9) appears there exactly once, as the far
+   end of a single CTA gradient, so it lives in --gradient-cta and is never used
+   as a surface, text, or fill on its own. Status colors (good/warning/serious/
+   critical) are the fixed, validated dataviz set and are never re-themed. */
 :root {
   color-scheme: light;
 
   --font-sans: var(--font-sans, Arial, Helvetica, sans-serif);
 
-  --brand-950: #0a0714;
-  --brand-900: #150a33;
-  --brand-800: #230f5c;
-  --brand-700: #330968;
-  --brand-600: #4b00f9;
-  --brand-500: #6a2bfb;
-  --brand-400: #8c58fc;
-  --brand-300: #b39dfa;
-  --brand-150: #e2d9fe;
-  --brand-100: #ece4fe;
+  --brand-950: #04160c;
+  --brand-900: #063019;
+  --brand-800: #075229;
+  --brand-700: #0a6c3c;
+  --brand-600: #17f082;
+  --brand-500: #4df3a0;
+  --brand-400: #86f7c1;
+  --brand-300: #b3fada;
+  --brand-150: #d9fdec;
+  --brand-100: #ebfef4;
   --accent-mint: #17f082;
-  --accent-mint-ink: #046b3d;
-  --accent-mint-bg: #e3fdf1;
+  --accent-mint-ink: #0a6c3c;
+  --accent-mint-bg: #ebfef4;
   --accent-blue: #233caf;
+  /* The reference's one violet touch, reserved for a hero CTA. Unused today. */
+  --gradient-cta: linear-gradient(125deg, #17f082, #4b00f9);
 
   --status-good: #0ca30c;
   --status-good-bg: #e5f7e5;
@@ -30,19 +35,20 @@
   --status-critical-bg: #fbe9e9;
 
   --surface: #ffffff;
-  --page: #f7f6fc;
-  --ink-primary: #150f2b;
-  --ink-secondary: #55516f;
-  --ink-muted: #8a86a3;
-  --ink-on-brand: #ffffff;
-  --border: #e6e1f6;
-  --border-strong: #d3caf2;
-  --gridline: #ece7f8;
+  --page: #f8f8f8;
+  --ink-primary: #0b0b0b;
+  --ink-secondary: #4d4d4d;
+  --ink-muted: #999999;
+  /* Mint is a light fill: text on it is near-black, as on the reference's buttons. */
+  --ink-on-brand: #04160c;
+  --border: #e6e6e6;
+  --border-strong: #d6d6d6;
+  --gridline: #efefef;
 
-  --shadow-sm: 0 1px 2px rgba(21, 15, 43, 0.06);
-  --shadow-md: 0 10px 28px -6px rgba(21, 15, 43, 0.14);
-  --shadow-lg: 0 20px 48px -12px rgba(21, 15, 43, 0.22);
-  --shadow-brand: 0 10px 24px -8px rgba(75, 0, 249, 0.35);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 10px 28px -6px rgba(0, 0, 0, 0.10);
+  --shadow-lg: 0 20px 48px -12px rgba(0, 0, 0, 0.16);
+  --shadow-brand: 0 8px 20px -8px rgba(23, 240, 130, 0.55);
 
   --radius-sm: 0.55rem;
   --radius-md: 0.9rem;
@@ -64,9 +70,6 @@ body {
   margin: 0;
   font-family: var(--font-sans);
   background: var(--page);
-  background-image: radial-gradient(60rem 30rem at 100% -10%, rgba(75, 0, 249, 0.06), transparent),
-    radial-gradient(40rem 24rem at -10% 0%, rgba(23, 240, 130, 0.05), transparent);
-  background-attachment: fixed;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -91,9 +94,9 @@ a {
   position: sticky;
   top: 0;
   z-index: 40;
-  background: linear-gradient(120deg, var(--brand-950) 0%, var(--brand-900) 55%, var(--brand-700) 130%);
-  color: #f4f2fb;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--surface);
+  color: var(--ink-primary);
+  border-bottom: 1px solid var(--border);
 }
 
 .nav-inner {
@@ -120,8 +123,7 @@ a {
   width: 1.6rem;
   height: 1.6rem;
   border-radius: 0.5rem;
-  background: linear-gradient(135deg, var(--accent-mint), var(--brand-500));
-  box-shadow: 0 4px 14px -4px rgba(75, 0, 249, 0.55);
+  background: var(--brand-600);
   flex-shrink: 0;
 }
 
@@ -132,7 +134,7 @@ a {
 
 .nav-link {
   position: relative;
-  color: rgba(244, 242, 251, 0.72);
+  color: var(--ink-secondary);
   text-decoration: none;
   padding: 0.5rem 0.95rem;
   border-radius: var(--radius-pill);
@@ -142,15 +144,14 @@ a {
 }
 
 .nav-link:hover {
-  color: #ffffff;
-  background: rgba(255, 255, 255, 0.08);
+  color: var(--ink-primary);
+  background: #f0f0f0;
 }
 
 .nav-link.active {
-  color: var(--brand-950);
-  background: var(--accent-mint);
+  color: var(--ink-on-brand);
+  background: var(--brand-600);
   font-weight: 600;
-  box-shadow: 0 6px 16px -6px rgba(23, 240, 130, 0.65);
 }
 
 /* Page layout */
@@ -449,7 +450,7 @@ a {
 .date-preset-trigger svg {
   width: 1rem;
   height: 1rem;
-  color: var(--brand-500);
+  color: var(--brand-700);
 }
 
 .date-preset-menu {
@@ -489,7 +490,7 @@ a {
 .date-preset-check {
   width: 1rem;
   height: 1rem;
-  color: var(--brand-600);
+  color: var(--brand-700);
   flex-shrink: 0;
 }
 
@@ -537,7 +538,7 @@ a {
   height: 1.1rem;
   border-radius: 50%;
   border: none;
-  background: rgba(75, 0, 249, 0.12);
+  background: var(--brand-150);
   color: var(--brand-700);
   cursor: pointer;
   font-size: 0.7rem;
@@ -545,7 +546,7 @@ a {
 }
 
 .filter-chip-remove:hover {
-  background: rgba(75, 0, 249, 0.22);
+  background: var(--brand-300);
 }
 
 /* Buttons & chips */
@@ -562,7 +563,7 @@ a {
 
 .button-primary {
   background: linear-gradient(135deg, var(--brand-600), var(--brand-500));
-  color: #ffffff;
+  color: var(--ink-on-brand);
   border: 1px solid transparent;
   padding: 0.6rem 1.3rem;
   font-weight: 650;
@@ -571,7 +572,7 @@ a {
 
 .button-primary:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 14px 28px -8px rgba(75, 0, 249, 0.45);
+  box-shadow: 0 14px 28px -8px rgba(23, 240, 130, 0.6);
 }
 
 .button-primary:disabled {
@@ -596,7 +597,7 @@ a {
 .button-ghost {
   background: none;
   border: none;
-  color: var(--brand-600);
+  color: var(--brand-700);
   padding: 0.3rem 0.2rem;
   font-weight: 600;
 }
@@ -645,7 +646,7 @@ a {
 }
 
 .chart-tooltip-label {
-  color: rgba(244, 242, 251, 0.65);
+  color: rgba(255, 255, 255, 0.62);
   margin: 0 0 0.3rem;
   font-size: 0.72rem;
   text-transform: uppercase;
@@ -667,7 +668,7 @@ a {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  color: rgba(244, 242, 251, 0.8);
+  color: rgba(255, 255, 255, 0.78);
 }
 
 .chart-tooltip-swatch {
@@ -707,7 +708,7 @@ a {
   text-transform: uppercase;
   letter-spacing: 0.045em;
   color: var(--ink-secondary);
-  background: #faf9fe;
+  background: #fafafa;
   position: sticky;
   top: 0;
 }
@@ -747,7 +748,7 @@ a {
 
 .th-sort[data-active="true"] svg {
   opacity: 1;
-  color: var(--brand-600);
+  color: var(--brand-700);
 }
 
 .th-sort[data-direction="desc"] svg {
@@ -764,7 +765,7 @@ a {
 .empty-state {
   text-align: center;
   padding: 2.75rem 1.25rem;
-  background: linear-gradient(180deg, #faf9ff, #f5f3fd);
+  background: linear-gradient(180deg, #fbfbfb, #f4f4f4);
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius-md);
   display: flex;
@@ -779,7 +780,7 @@ a {
   height: 2.75rem;
   border-radius: 50%;
   background: var(--brand-100);
-  color: var(--brand-500);
+  color: var(--brand-700);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -864,7 +865,7 @@ a {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #ffffff;
+  color: var(--ink-on-brand);
   box-shadow: var(--shadow-brand);
 }
 
@@ -911,7 +912,7 @@ a {
 
 .chat-avatar-assistant {
   background: linear-gradient(135deg, var(--accent-mint), var(--brand-500));
-  color: #ffffff;
+  color: var(--ink-on-brand);
 }
 
 .chat-avatar-user {
@@ -928,7 +929,7 @@ a {
 
 .chat-bubble-user {
   background: linear-gradient(135deg, var(--brand-600), var(--brand-500));
-  color: #ffffff;
+  color: var(--ink-on-brand);
   border-bottom-right-radius: 0.3rem;
 }
 
@@ -1115,7 +1116,7 @@ a {
 .trace-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(21, 15, 43, 0.34);
+  background: rgba(0, 0, 0, 0.32);
   backdrop-filter: blur(2px);
   z-index: 40;
   animation: trace-fade 160ms var(--ease-out);
@@ -1207,7 +1208,7 @@ a {
   gap: 0.5rem;
   padding: 0.6rem 1.25rem;
   border-bottom: 1px solid var(--border);
-  background: #faf9fe;
+  background: #fafafa;
 }
 
 .trace-op-chip {
@@ -1225,7 +1226,7 @@ a {
   background: none;
   border: none;
   padding: 0;
-  color: var(--brand-600);
+  color: var(--brand-700);
   font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
@@ -1266,7 +1267,7 @@ a {
 }
 
 .trace-section-toggle:hover {
-  background: #faf9fe;
+  background: #fafafa;
 }
 
 .trace-caret {
@@ -1381,7 +1382,7 @@ a {
 }
 
 .trace-step:hover {
-  background: #faf9fe;
+  background: #fafafa;
 }
 
 .trace-step.is-active {
@@ -1428,7 +1429,7 @@ a {
   flex-direction: column;
   gap: 0.15rem;
   padding: 0.45rem 0.75rem;
-  background: #faf9fe;
+  background: #fafafa;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
@@ -1492,7 +1493,7 @@ a {
   align-items: center;
   gap: 0.4rem;
   padding: 0.4rem 0.65rem;
-  background: #faf9fe;
+  background: #fafafa;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   font-size: 0.85rem;
@@ -1593,7 +1594,7 @@ a {
   margin: 0;
   padding: 0.75rem 0.85rem;
   background: var(--brand-950);
-  color: #ded5fb;
+  color: #dbeee3;
   border-radius: var(--radius-sm);
   font-size: 0.75rem;
   line-height: 1.55;
