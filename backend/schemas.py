@@ -197,6 +197,7 @@ class QueryResult(ContractModel):
     columns: list[str]
     rows: list[list[Scalar]]
     row_count: Annotated[int, Field(ge=0)]
+    total_groups: Annotated[int, Field(ge=0)]
     metric: MetricName
     resolved_time_range: ResolvedTimeRange | None
     truncated: bool = False
@@ -204,8 +205,14 @@ class QueryResult(ContractModel):
     @model_validator(mode="after")
     def validate_tabular_shape(self) -> QueryResult:
         expected_width = len(self.columns)
-        if len(self.rows) > self.row_count:
-            raise ValueError("returned rows cannot exceed row_count")
+        if len(self.rows) != self.row_count:
+            raise ValueError("row_count must equal the number of returned rows")
+        if self.total_groups < self.row_count:
+            raise ValueError("total_groups cannot be less than row_count")
+        if self.truncated != (self.total_groups > self.row_count):
+            raise ValueError(
+                "truncated must indicate whether total_groups exceeds row_count"
+            )
         if any(len(row) != expected_width for row in self.rows):
             raise ValueError("every row must have the same width as columns")
         return self

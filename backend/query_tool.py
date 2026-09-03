@@ -258,6 +258,7 @@ def run_query(
             columns=[metric.name],
             rows=[[metric.compute(working)]],
             row_count=1,
+            total_groups=1,
             metric=metric.name,
             resolved_time_range=resolved.resolved_time_range,
             truncated=False,
@@ -269,6 +270,7 @@ def run_query(
             columns=[*request.dimensions, metric.name],
             rows=[],
             row_count=0,
+            total_groups=0,
             metric=metric.name,
             resolved_time_range=resolved.resolved_time_range,
             truncated=False,
@@ -310,13 +312,15 @@ def run_query(
     truncated = total_groups > request.limit
     table = table.head(request.limit)
 
+    rows = [
+        [_to_scalar(value) for value in row]
+        for row in table.itertuples(index=False, name=None)
+    ]
     return QueryResult(
         columns=list(table.columns),
-        rows=[
-            [_to_scalar(value) for value in row]
-            for row in table.itertuples(index=False, name=None)
-        ],
-        row_count=total_groups,
+        rows=rows,
+        row_count=len(rows),
+        total_groups=total_groups,
         metric=metric.name,
         resolved_time_range=resolved.resolved_time_range,
         truncated=truncated,

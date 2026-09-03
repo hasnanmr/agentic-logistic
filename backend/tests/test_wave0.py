@@ -175,10 +175,11 @@ def test_contract_examples_allow_response_previews() -> None:
         {
             "columns": ["carrier", "delay_rate"],
             "rows": [["UPS", 50.0], ["USPS", 25.0]],
-            "row_count": 9,
+            "row_count": 2,
+            "total_groups": 9,
             "metric": "delay_rate",
             "resolved_time_range": {"start": "2025-11-01", "end": "2025-11-30"},
-            "truncated": False,
+            "truncated": True,
         }
     )
     forecast_result = ForecastResult.model_validate(
@@ -223,10 +224,9 @@ def test_contract_examples_allow_response_previews() -> None:
         }
     )
 
-    # The point of both examples: a preview carries fewer rows than the result
-    # counts, and the contract has to accept that without the two numbers
-    # being read as a contradiction.
-    assert query_result.row_count == 9
-    assert len(query_result.rows) < query_result.row_count
+    # The preview's row count describes its payload, while total_groups keeps
+    # the size of the complete grouped result explicit.
+    assert query_result.row_count == len(query_result.rows) == 2
+    assert query_result.total_groups == 9
     assert forecast_result.horizon_weeks == 4
     assert len(forecast_result.history) < forecast_result.history_window.observations

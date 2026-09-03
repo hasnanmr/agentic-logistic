@@ -74,6 +74,7 @@ export interface QueryResult {
   columns: string[];
   rows: Scalar[][];
   row_count: number;
+  total_groups: number;
   metric: MetricName;
   resolved_time_range: ResolvedTimeRange | null;
   truncated: boolean;

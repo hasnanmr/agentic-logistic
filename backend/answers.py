@@ -71,7 +71,7 @@ def compose_query_answer(request: QueryStructuredRequest, result: QueryResult) -
     if not request.dimensions:
         return f"{metric.label} is {format_metric(metric.name, result.rows[0][0])}."
 
-    if result.row_count == 0:
+    if result.total_groups == 0:
         return "No orders match those filters, so there is nothing to report."
 
     dimension = request.dimensions[0]
@@ -84,8 +84,8 @@ def compose_query_answer(request: QueryStructuredRequest, result: QueryResult) -
         )
 
     summary = (
-        f"{metric.label} by {dimension} across {result.row_count} "
-        f"{'group' if result.row_count == 1 else 'groups'}."
+        f"{metric.label} by {dimension} across {result.total_groups} "
+        f"{'group' if result.total_groups == 1 else 'groups'}."
     )
     if request.sort is not None:
         summary += f" Leading: {leader[0]} at {format_metric(metric.name, leader[-1])}."
@@ -119,6 +119,7 @@ def forecast_preview(result: ForecastResult) -> QueryResult:
         columns=["period", "order_demand", "series"],
         rows=rows,
         row_count=len(rows),
+        total_groups=len(rows),
         metric="order_demand",
         resolved_time_range=None,
         truncated=False,

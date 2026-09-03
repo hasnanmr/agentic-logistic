@@ -4,8 +4,9 @@ AI-powered logistics analytics dashboard with forecasting and Q&A capabilities.
 
 ## Tech Stack
 
-- **Backend:** Python 3.11+, FastAPI, Uvicorn
-- **Frontend:** Next.js 15, React 19, TypeScript
+- **Backend:** Python 3.11+, FastAPI, pandas, Uvicorn
+- **AI orchestration:** deepagents/LangChain with an OpenAI-compatible model
+- **Frontend:** Next.js 15, React 19, TypeScript, Recharts
 - **Package Manager:** uv (Python), npm (Node.js)
 
 ## Prerequisites
@@ -18,15 +19,21 @@ AI-powered logistics analytics dashboard with forecasting and Q&A capabilities.
 
 ### 1. Clone & Environment
 
+Obtain the environment values through the separate secure handoff, then create
+the local files from the committed templates:
+
 ```bash
 cp .env.example .env
-# Edit .env with your values (LLM_API_KEY is required for AI features)
-
 cp frontend/.env.example frontend/.env.local
-# Keep NEXT_PUBLIC_API_USERNAME/PASSWORD in sync with APP_USERNAME/APP_PASSWORD
 ```
 
+Replace the placeholders with the separately supplied values. Never commit,
+paste into documentation, or share the completed environment files. Both are
+covered by the repository's `.gitignore` rules.
+
 ### 2. Backend
+
+In the first terminal, from the repository root:
 
 ```bash
 # Install dependencies
@@ -38,6 +45,8 @@ uv run uvicorn backend.main:app --reload --port 8080
 
 ### 3. Frontend
 
+In a second terminal:
+
 ```bash
 cd frontend
 
@@ -47,6 +56,11 @@ npm install
 # Run development server (http://localhost:3001 — the port is set in package.json)
 npm run dev
 ```
+
+As a shortcut, `make dev` installs dependencies and starts both services from
+the repository root. Use `NEXT_PUBLIC_DATA_MODE=fixtures` if you only want to
+work on the frontend with bundled sample data; this mode does not need the
+backend or an LLM key.
 
 ### 4. Access
 
@@ -61,31 +75,242 @@ the backend at `NEXT_PUBLIC_API_BASE_URL`, which defaults to
 
 ## API Authentication
 
-The API uses HTTP Basic Auth. Configure credentials in `.env`:
-
-```
-APP_USERNAME=reviewer
-APP_PASSWORD=change-me
-```
+The API uses HTTP Basic Auth. Configure its credentials only in the local
+`.env` file or the deployment platform's secret store using the values supplied
+separately. Do not commit or include credential values in documentation.
 
 ## Environment Variables
 
+The tables below document only the required variable names and their purpose.
+Values are intentionally omitted and distributed separately.
+
 Backend (`.env`):
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `APP_USERNAME` | Basic auth username | `reviewer` |
-| `APP_PASSWORD` | Basic auth password | `change-me` |
-| `LLM_BASE_URL` | LLM API base URL | `https://openrouter.ai/api/v1` |
-| `LLM_API_KEY` | LLM API key | (required) |
-| `LLM_MODEL` | LLM model identifier | `openai/gpt-5.6-luna` |
-| `ASK_NARRATION` | `composed` (server writes the answer) or `verified` (agent writes it, every number checked) | `composed` |
-| `DATA_CSV_PATH` | Path to logistics CSV data | `mock_logistics_data.csv` |
-| `FRONTEND_ORIGIN` | Origin allowed by CORS | `http://localhost:3001` |
+| Variable | Sensitive | Description |
+|----------|-----------|-------------|
+| `APP_USERNAME` | Yes | HTTP Basic Auth username. The API fails closed if either credential is unset. |
+| `APP_PASSWORD` | Yes | HTTP Basic Auth password. |
+| `LLM_API_KEY` | Yes | Provider credential required for analytical `/api/ask` questions. Dashboard queries, health, greetings, and local carrier definitions do not need it. |
+| `LLM_BASE_URL` | No | OpenAI-compatible API root. |
+| `LLM_MODEL` | No | Model identifier understood by the configured provider. |
+| `ASK_NARRATION` | No | `composed` makes the server write answer prose; `verified` permits model prose only when every number is grounded in tool output. Invalid values fall back to `composed`. |
+| `DATA_CSV_PATH` | No | Logistics CSV path, resolved from the backend process working directory. |
+| `FRONTEND_ORIGIN` | No | The one browser origin allowed by CORS. |
 
 The provider is any OpenAI-compatible chat-completions endpoint. `LLM_MODEL`
 must match what that endpoint expects — OpenRouter ids carry a provider prefix
 (`openai/gpt-5.6-luna`), `api.openai.com` ids do not.
+
+Frontend (`frontend/.env.local`):
+
+| Variable | Description |
+|----------|-------------|
+| `NEXT_PUBLIC_API_BASE_URL` | Backend base URL. |
+| `NEXT_PUBLIC_API_USERNAME` | Basic auth username; must match `APP_USERNAME`. |
+| `NEXT_PUBLIC_API_PASSWORD` | Basic auth password; must match `APP_PASSWORD`. |
+| `NEXT_PUBLIC_DATA_MODE` | `api` uses the backend; `fixtures` renders bundled sample responses without it. |
+
+All `NEXT_PUBLIC_*` values are embedded in browser JavaScript and cannot be
+treated as secrets. The current Basic Auth pair is therefore reviewer access,
+not production-grade authentication. When changing either local port, also
+update `NEXT_PUBLIC_API_BASE_URL` or `FRONTEND_ORIGIN` as appropriate.
+
+## System overview
+
+The application has two interfaces over one read-only logistics dataset:
+
+- The **Operations Dashboard** sends predefined structured requests to
+  `POST /api/query` for KPIs, weekly volume, and carrier performance.
+- **Ask Operations** sends a natural-language question to `POST /api/ask`. An
+  LLM interprets the request, but governed Python tools perform every
+  calculation. `POST /api/forecast` also exposes the forecast directly to a
+  structured client.
+
+The backend loads and validates the CSV once into an in-memory pandas
+`DataFrame`. Both the dashboard and agent tools use the same query engine,
+metric registry, and status rules.
+
+```text
+Dashboard filters ──> POST /api/query ───────────────────────────────┐
+                                                                  │
+Natural-language question ─> POST /api/ask                         │
+  ├─> small-talk templates / carrier glossary (no LLM)             │
+  └─> LLM interpretation ─> query_tool or forecast_tool             │
+                               │                                   │
+                               v                                   v
+                    validated structured request ─> query/forecast engine
+                                                        │
+                                                        v
+                  validated CSV ─> status rules ─> metric registry
+                                                        │
+                                                        v
+                         composed answer + table + deterministic chart
+                                      + explainability trace
+```
+
+### Key design decisions
+
+- **One metric implementation.** `backend/metrics.py` is the only KPI
+  registry, and `backend/status_rules.py` is the only definition of status
+  membership. The dashboard and conversational paths cannot drift into
+  different formulas.
+- **Structured requests, never generated SQL.** Pydantic allow-lists metrics,
+  dimensions, filters, operators, sorting, row limits, and forecast horizons
+  before pandas runs. Semantic checks reject combinations that parse but do
+  not make sense.
+- **The model is an orchestrator, not a calculator.** It never receives CSV
+  rows or computed values. Tools store complete result blocks for the API and
+  return only receipts such as `Stored result 1: delay_rate by carrier` to the
+  model.
+- **Grounded output.** In the default `composed` mode, application code writes
+  all numerical prose from computed results. In `verified` mode, model-written
+  prose is used only after every number is matched to tool output; otherwise
+  the composed answer wins.
+- **Deterministic presentation.** A time breakdown becomes a line chart, one
+  categorical breakdown becomes a bar chart, and scalar or multi-dimensional
+  output remains a table. The model does not select chart types, and chart data
+  is built from the same rows shown in the table.
+- **Read-only, fail-closed data handling.** There is no mutation endpoint or
+  database write path. Ingestion rejects missing columns, malformed dates,
+  reversed delivery dates, duplicate order IDs, and unknown statuses.
+- **Visible reasoning boundary.** Each result includes the structured request,
+  metric definition and population, resolved dates and filters, query plan,
+  result preview, and model-versus-compute timing.
+
+### Main backend modules
+
+| Module | Responsibility |
+|--------|----------------|
+| `backend/ingestion.py` | Load, validate, and cache the CSV. |
+| `backend/status_rules.py` | Define delivered, delayed, and delivery-dated populations. |
+| `backend/metrics.py` | Compute the approved KPI registry. |
+| `backend/query_tool.py` | Resolve dates, apply filters/grouping/sorting, and execute queries. |
+| `backend/forecast.py` | Produce weekly demand forecasts and capacity guidance. |
+| `backend/agent.py` | Configure the agent prompt, planning loop, limits, threads, and subagents. |
+| `backend/agent_tools.py` | Validate tool arguments and collect governed result blocks. |
+| `backend/answers.py` / `backend/grounding.py` | Compose answers and verify optional model narration. |
+| `backend/orchestrator.py` | Run one question and assemble the API response. |
+
+## How questions are interpreted and tools are selected
+
+`POST /api/ask` uses the following routing process:
+
+1. Whole-message greetings and thanks are answered from local English,
+   Indonesian, or Chinese templates. Informational questions about a supported
+   carrier are answered from a source-backed local glossary. Neither path calls
+   the model.
+2. For an analytical question, the temperature-zero LLM resolves conversational
+   context and translates the wording into an allow-listed metric, dimensions,
+   filters, time range, sort, limit, or forecast horizon.
+3. The model selects `query_tool` for historical counts, rates, delivery time,
+   trends, comparisons, and rankings; `forecast_tool` for future weekly order
+   demand; or `decline_tool` when the requested information is absent.
+4. Compound questions produce one tool call per distinct figure or comparison
+   window. Open-ended requests such as “where are delays concentrated?” may be
+   delegated to a restricted trend investigator that runs several governed
+   breakdowns.
+5. Tool arguments are validated. A rejected call is returned to the agent so
+   it can correct the arguments within the run limits (8 model calls and 12
+   tool calls). If no valid computation is possible, the API returns HTTP 200
+   with `unsupported: true` and an explanation instead of guessing.
+6. The tool computes and stores the result while exposing only a receipt to the
+   model. Application code then creates the answer, table, chart, and trace.
+
+Follow-ups can send the returned `thread_id`; otherwise clients may replay up
+to 10 question/answer turns in `history`. A thread takes precedence over
+history. The process retains at most 200 recent threads in memory.
+
+### Supported analytical grammar
+
+| Part | Supported values |
+|------|------------------|
+| Metrics | `total_orders`, `delivered_orders`, `delayed_orders`, `on_time_rate`, `delay_rate`, `avg_delivery_time`, `order_demand` |
+| Breakdowns | `order_date`, ISO `week`, `month`, `carrier`, `origin_city`, `destination_city`, `status`, `region`, `product_category` |
+| Filters | `order_date`, `delivery_date`, `carrier`, `origin_city`, `destination_city`, `status`, `region`, `product_category` |
+| Operators | `eq`, `neq`, `in`, `not_in`; `gt`, `gte`, `lt`, and `lte` only for date fields |
+| Time ranges | Inclusive explicit dates, `previous_week`, `previous_month`, `last_N_weeks`, `last_N_months` |
+| Ranking | Sort ascending or descending by the requested metric or a selected dimension; return 1–1000 rows |
+| Forecasting | Aggregate `order_demand`, weekly grain only, 1–8 weeks ahead, optionally filtered |
+
+Status-derived metrics (`delivered_orders`, `delayed_orders`, `on_time_rate`,
+and `delay_rate`) cannot be broken down by `status`, because each status group
+would make those values degenerate. `avg_delivery_time`, `total_orders`, and
+`order_demand` can use every listed dimension.
+
+Forecasts use counts from complete ISO weeks, require at least eight complete
+weeks, and fit a least-squares line over up to the latest 12 complete weeks.
+The mean projected demand is compared with the trailing four-week mean: above
+10% recommends increased capacity, below -10% recommends no increase, and the
+middle band recommends holding. Negative projections are floored at zero.
+
+## Assumptions, simplifications, and limitations
+
+- The bundled dataset is a 400-row synthetic snapshot covering 2025. It is
+  treated as the source of truth; the application validates internal
+  consistency but cannot establish real-world accuracy.
+- Relative dates are anchored to the dataset's latest `order_date`, not the
+  wall clock. This keeps “last month” meaningful for a historical snapshot,
+  and the resolved dates are returned in explainability metadata.
+- `delivered` means on time and `delayed` means delivered late. Both count as
+  delivered for rate denominators. `exception` is excluded from on-time/delay
+  rates but included in average delivery time when it has a delivery date.
+- `order_demand` means number of order rows, not item quantity, SKU demand,
+  inventory consumption, weight, revenue, or shipment capacity units.
+- The CSV is loaded once per backend process. File changes require a restart;
+  there is no live ingestion, database, incremental refresh, or multi-dataset
+  join.
+- The forecast is a deliberately simple univariate trend. It has no seasonality,
+  holidays, promotions, confidence intervals, backtesting/model selection, or
+  causal features, and it forecasts a filtered aggregate rather than separate
+  grouped series.
+- “Where are delays concentrated?” can be answered with breakdowns, but “why
+  did delays happen?” cannot: correlation and segment differences are not
+  evidence of cause.
+- Conversation state and the LRU list of 200 threads are process-local. A
+  restart or another replica loses that state; replayed `history` is the
+  fallback and only the latest 10 turns are accepted.
+- HTTP Basic Auth is sufficient for a reviewer MVP but has no accounts, roles,
+  expiry, or server-side browser session. Use TLS outside localhost. Public
+  frontend environment variables must not hold privileged production secrets.
+- If the Ask page cannot reach the model/API, it displays a clearly labelled
+  bundled sample response. That fallback is a UI demonstration, not a live
+  answer to the submitted question.
+
+### Unsupported queries
+
+The system intentionally declines requests for data or operations outside the
+grammar, including:
+
+- cost, profit, revenue, customer satisfaction, SLAs, inventory levels, or
+  other fields that are not governed by the application;
+- SKU-level, quantity-based, monthly, or longer-than-eight-week forecasts;
+- route inference, live tracking, geospatial analysis, optimization, anomaly
+  attribution, or causal explanations;
+- arbitrary calculations, arbitrary SQL, free-form joins, writes, updates, or
+  deletion; and
+- unknown metrics/dimensions/operators, lexicographic range comparisons on
+  label fields, or semantically invalid metric/dimension combinations.
+
+## Future improvements
+
+- Replace the static CSV/cache with authenticated warehouse or operational
+  database access, scheduled ingestion, freshness metadata, and data-quality
+  monitoring.
+- Add real identity, role-based authorization, server-managed sessions, secret
+  handling, audit logs, rate limits, and durable/shared conversation storage.
+- Expand the governed semantic layer with quantity, SKU, cost, SLA, inventory,
+  and route metrics while preserving explicit definitions and reconciliation
+  tests.
+- Add grouped and longer-horizon forecasting, seasonality and external
+  regressors, confidence intervals, backtesting, model selection, and forecast
+  accuracy monitoring before using recommendations operationally.
+- Improve interpretation with ambiguity detection and clarification, entity
+  normalization, multilingual analytical prompts, and evaluation sets for tool
+  selection and multi-turn questions.
+- Move compound-result synthesis into a deterministic cross-result composer so
+  comparisons remain concise without relying on optional model narration.
+- Add pagination/export, richer multi-dimensional visualizations, accessibility
+  testing, observability, caching, and end-to-end browser tests.
 
 ## How the numbers are verified
 
@@ -119,56 +344,6 @@ combinations rather than three hand-picked ones. Ingestion fails closed on a
 missing file, missing columns, non-ISO dates, a delivery date that precedes its
 order date, duplicate `order_id`s, and unmapped status values.
 
-## The Ask Operations agent
-
-Ask Operations runs on [deepagents](https://docs.langchain.com/oss/python/deepagents/overview),
-so one question can drive several tool calls: the agent plans with
-`write_todos`, calls a tool, reads the result, corrects arguments a schema
-rejected, calls again for a second figure, and can delegate open-ended
-diagnosis to a subagent.
-
-What it cannot do is see data or invent a figure. The tools compute the answer
-and file it for the user, then return the agent a **receipt** — which result
-was stored and what shape it has, never a value:
-
-```
-Stored result 1: delay_rate by carrier, 9 group(s).
-```
-
-So the model's context never holds a row of the dataset, and `answer` is
-written by application code from the computed results (`ASK_NARRATION=composed`).
-Set `ASK_NARRATION=verified` to let the agent write the prose instead; it is
-printed only if every number in it traces back to a computed result, and
-otherwise the composed text is used.
-
-| Module | Role |
-|--------|------|
-| `backend/agent.py` | Agent assembly, **system prompts**, call limits, subagents, conversation threads |
-| `backend/agent_tools.py` | The three tools (`query_tool`, `forecast_tool`, `decline_tool`) and the run collector |
-| `backend/answers.py` | Composes answer prose and explainability from computed results |
-| `backend/grounding.py` | Checks that every number in a narration came from a tool |
-| `backend/orchestrator.py` | Runs the agent and assembles the `AskResponse` |
-| `backend/llm.py` | Chat-model construction and credentials |
-
-`POST /api/ask` returns one `results` block per tool call. `chart`, `table` and
-`explainability` remain as read-only views of the first block, so a
-single-result client needs no change. The response also carries `thread_id`:
-send it back with the next question and the server continues the conversation
-from its checkpointer instead of relying on replayed `history`.
-
-Threads live in process memory, bounded to the 200 most recent, so a restart or
-a second replica loses them — clients should keep sending `history` as the
-fallback.
-
-Frontend (`frontend/.env.local`):
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `NEXT_PUBLIC_API_BASE_URL` | Backend base URL | `http://localhost:8080` |
-| `NEXT_PUBLIC_API_USERNAME` | Basic auth username, must match `APP_USERNAME` | `reviewer` |
-| `NEXT_PUBLIC_API_PASSWORD` | Basic auth password, must match `APP_PASSWORD` | `change-me` |
-| `NEXT_PUBLIC_DATA_MODE` | `api` for the real backend, `fixtures` for sample data with no backend | `api` |
-
 ## Testing
 
 ```bash
@@ -186,8 +361,13 @@ cd frontend && npm run test:watch
 uv run pytest --cov=backend
 ```
 
-Every push and pull request also runs the backend and frontend unit tests through
-GitHub Actions in `.github/workflows/ci.yml`.
+Pull requests, and pushes to `main`, also run both suites through GitHub Actions
+in `.github/workflows/ci.yml`. The backend job is advisory rather than a merge
+gate: provisioning its environment (deepagents pulls in langchain, anthropic and
+google-genai, so the virtualenv is ~209 MB) costs minutes on a runner, while the
+283 backend tests themselves finish in about five seconds. Run `make test`
+before pushing and treat the Actions result as a second opinion, not the check
+you wait on.
 
 ## Docker
 

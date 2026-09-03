@@ -92,7 +92,7 @@ def test_with_nothing_computed_any_real_figure_is_ungrounded() -> None:
 
 def test_row_counts_and_metric_bases_are_grounded(dataset: pd.DataFrame) -> None:
     result = result_for(dataset, metric="delay_rate", dimensions=["carrier"])
-    groups = result.table.row_count
+    groups = result.table.total_groups
     basis = result.explainability.metric_basis.row_count
 
     assert grounding.is_grounded(f"{groups} groups over {basis} orders.", [result])

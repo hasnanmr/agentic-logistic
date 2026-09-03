@@ -439,7 +439,10 @@ export default function TraceSidebar({
               <>
                 <DataTable result={explainability.result_preview} />
                 {explainability.result_preview.truncated ? (
-                  <p className="trace-note">Preview truncated.</p>
+                  <p className="trace-note">
+                    Showing {explainability.result_preview.row_count} of{" "}
+                    {explainability.result_preview.total_groups} groups.
+                  </p>
                 ) : null}
               </>
             )}

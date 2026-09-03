@@ -395,6 +395,7 @@ export default function DashboardPage() {
                     row.delayRate,
                   ]),
                   row_count: carrierRows.length,
+                  total_groups: carrierRows.length,
                   metric: "delay_rate",
                   resolved_time_range: null,
                   truncated: false,

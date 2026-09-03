@@ -153,7 +153,7 @@ def query_tool(runtime: ToolRuntime, **arguments: Any) -> str:
     )
 
     breakdown = (
-        f" by {', '.join(request.dimensions)}, {result.row_count} group(s)"
+        f" by {', '.join(request.dimensions)}, {result.total_groups} group(s)"
         if request.dimensions
         else " as a single figure"
     )

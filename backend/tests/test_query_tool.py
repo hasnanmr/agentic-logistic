@@ -55,14 +55,15 @@ def test_ranking_query_sorts_and_limits(dataset: pd.DataFrame) -> None:
             metric="delay_rate",
             dimensions=["carrier"],
             sort={"by": "delay_rate", "direction": "desc"},
-            limit=1,
+            limit=3,
         ),
         dataset,
     )
 
-    assert len(result.rows) == 1
+    assert len(result.rows) == 3
     assert result.truncated is True
-    assert result.row_count == 9  # nine carriers considered, one returned
+    assert result.row_count == 3
+    assert result.total_groups == 9
 
 
 def test_weekly_trend_buckets_are_iso_weeks(dataset: pd.DataFrame) -> None:

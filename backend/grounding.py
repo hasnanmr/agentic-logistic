@@ -64,6 +64,7 @@ def grounded_numbers(results: Iterable[AskResult]) -> set[Decimal]:
         table = result.table
         if table is not None:
             admit(table.row_count)
+            admit(table.total_groups)
             admit(len(table.rows))
             for row in table.rows:
                 for cell in row:

@@ -13,6 +13,7 @@ const result = {
   columns: ["carrier", "delay_rate"],
   rows: [["DHL", 11.1]],
   row_count: 1,
+  total_groups: 1,
   metric: "delay_rate" as const,
   resolved_time_range: null,
   truncated: false,
