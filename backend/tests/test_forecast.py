@@ -103,10 +103,11 @@ def test_horizon_bounds_are_honoured(dataset: pd.DataFrame, horizon: int) -> Non
     assert len(result.forecast) == horizon
 
 
-def test_baseline_window_is_wider_than_the_model_window() -> None:
-    """Otherwise F and B are the same number and only 'hold' is reachable."""
+def test_baseline_window_matches_the_spec() -> None:
+    """The recommendation baseline is the trailing four complete weeks."""
 
-    assert BASELINE_WINDOW_WEEKS > MODEL_WINDOW_WEEKS
+    assert BASELINE_WINDOW_WEEKS == 4
+    assert BASELINE_WINDOW_WEEKS == MODEL_WINDOW_WEEKS
 
 
 def test_recommendation_reports_baseline_forecast_and_rule(
@@ -116,18 +117,20 @@ def test_recommendation_reports_baseline_forecast_and_rule(
 
     assert recommendation is not None
     assert recommendation.forecast_level == 5.5
-    assert recommendation.baseline_weekly_orders > 0
-    assert "trailing" in recommendation.rule
-    assert recommendation.action in {"increase_capacity", "no_increase", "hold"}
+    assert recommendation.baseline_weekly_orders == 5.5
+    assert "trailing 4 weeks" in recommendation.rule
+    assert recommendation.action == "hold"
 
 
-def test_rising_demand_recommends_extra_capacity() -> None:
-    """A clearly climbing series must be able to reach increase_capacity."""
+def test_rising_demand_uses_only_the_trailing_four_week_baseline() -> None:
+    """The baseline must not include older, lower-demand weeks."""
 
     days: list[str] = []
     start = pd.Timestamp("2025-01-06")  # a Monday, so every week is complete
-    for week in range(16):
-        # 2 orders/week for the first 12 weeks, then 12/week for the last 4.
+    for week in range(17):
+        # 2 orders/week for the first 12 weeks, then 12/week for the last 5.
+        # The final calendar week is excluded as a part-week, leaving four
+        # complete high-demand weeks in the trailing baseline.
         per_week = 2 if week < 12 else 12
         for order in range(per_week):
             days.append((start + timedelta(weeks=week, days=order % 7)).date().isoformat())
@@ -135,14 +138,16 @@ def test_rising_demand_recommends_extra_capacity() -> None:
 
     result = run_forecast(build(horizon_weeks=4), frame)
 
-    assert result.recommendation.action == "increase_capacity"
-    assert result.recommendation.delta_orders_per_week > 0
+    assert result.recommendation.baseline_weekly_orders == 12
+    assert result.recommendation.action == "hold"
 
 
-def test_falling_demand_recommends_no_increase() -> None:
+def test_falling_demand_uses_only_the_trailing_four_week_baseline() -> None:
     days: list[str] = []
     start = pd.Timestamp("2025-01-06")
-    for week in range(16):
+    for week in range(17):
+        # The final calendar week is excluded as a part-week, leaving four
+        # complete low-demand weeks in the trailing baseline.
         per_week = 12 if week < 12 else 2
         for order in range(per_week):
             days.append((start + timedelta(weeks=week, days=order % 7)).date().isoformat())
@@ -150,7 +155,8 @@ def test_falling_demand_recommends_no_increase() -> None:
 
     result = run_forecast(build(), frame)
 
-    assert result.recommendation.action == "no_increase"
+    assert result.recommendation.baseline_weekly_orders == 2
+    assert result.recommendation.action == "hold"
     assert result.recommendation.delta_orders_per_week == 0
 
 

@@ -9,11 +9,11 @@ Two details matter more than the method choice:
   and ends mid-week (Tue 2025-12-30), so its first and last ISO weeks hold 5 and
   2 days of orders. Leaving them in drags the trailing four-week mean from 5.50
   to 4.75 - a ~14% understatement that would look entirely plausible.
-* **The baseline is a longer window than the model.** A four-week moving average
-  compared against a trailing four-week mean is the same number by
-  construction, so the threshold could never be crossed and the recommendation
-  could only ever say "hold". The baseline is therefore the trailing twelve
-  weeks: "is projected demand above the medium-run norm?".
+* **The recommendation baseline uses the trailing four complete weeks.** This
+  is the fixed comparison window required by the product spec. With the current
+  flat moving-average method, the baseline and forecast level are intentionally
+  the same; the recommendation rule remains explicit and ready for methods that
+  produce a varying forecast across the horizon.
 """
 
 from __future__ import annotations
@@ -40,9 +40,8 @@ WEEK_FREQ: Final = "W-SUN"
 #: Weeks averaged to produce the forecast level.
 MODEL_WINDOW_WEEKS: Final = 4
 
-#: Weeks averaged to produce the comparison baseline. Deliberately wider than
-#: MODEL_WINDOW_WEEKS - see the module docstring.
-BASELINE_WINDOW_WEEKS: Final = 12
+#: Weeks averaged to produce the comparison baseline.
+BASELINE_WINDOW_WEEKS: Final = 4
 
 #: Relative gap from baseline before a capacity change is recommended.
 THRESHOLD: Final = 0.10
