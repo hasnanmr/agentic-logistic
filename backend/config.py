@@ -12,9 +12,9 @@ APP_PASSWORD = os.getenv("APP_PASSWORD", "change-me")
 SESSION_SECRET = os.getenv("SESSION_SECRET", "replace-with-a-random-secret")
 
 # LLM
-LLM_BASE_URL = os.getenv("LLM_BASE_URL")
+LLM_BASE_URL = os.getenv("LLM_BASE_URL") or "https://openrouter.ai/api/v1"
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
-LLM_MODEL = os.getenv("LLM_MODEL", "openai/gpt-5.6-luna")
+LLM_MODEL = os.getenv("LLM_MODEL") or "openai/gpt-5.6-luna"
 
 # Data
 DATA_CSV_PATH = os.getenv("DATA_CSV_PATH", "mock_logistics_data.csv")

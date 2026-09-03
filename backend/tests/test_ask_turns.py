@@ -117,7 +117,14 @@ def test_request_rejects_more_than_ten_turns(client: TestClient, auth: tuple[str
     assert response.status_code == 422
 
 
-def test_request_accepts_exactly_ten_turns(client: TestClient, auth: tuple[str, str]) -> None:
+def test_request_accepts_exactly_ten_turns(
+    client: TestClient,
+    auth: tuple[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Keep this contract test independent of provider credentials and network.
+    monkeypatch.setattr("backend.ask_api.get_client", RecordingClient)
+
     payload = {
         "question": "follow up?",
         "history": [_api_turn(index) for index in range(MAX_HISTORY_TURNS)],
@@ -125,9 +132,8 @@ def test_request_accepts_exactly_ten_turns(client: TestClient, auth: tuple[str, 
 
     response = client.post("/api/ask", json=payload, auth=auth)
 
-    # The LLM is unavailable in tests, so an accepted request surfaces as 503;
-    # a malformed request would be 422 before any model access.
-    assert response.status_code in {200, 503}
+    # A malformed request would be 422 before the stub is reached.
+    assert response.status_code == 200
 
 
 def test_empty_history_defaults_to_no_messages() -> None:

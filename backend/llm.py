@@ -57,7 +57,7 @@ class OpenAICompatibleClient:
     ) -> None:
         from openai import OpenAI
 
-        self._model = model or os.environ.get("LLM_MODEL", DEFAULT_MODEL)
+        self._model = model or os.environ.get("LLM_MODEL") or DEFAULT_MODEL
         self._client = OpenAI(
             api_key=api_key, base_url=base_url or DEFAULT_BASE_URL
         )

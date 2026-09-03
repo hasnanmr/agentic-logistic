@@ -14,7 +14,7 @@ COPY mock_logistics_data.csv ./
 
 RUN uv sync --frozen --no-dev
 
-ENV APP_PORT=8080
-EXPOSE 8080
+ENV APP_PORT=8081
+EXPOSE 8081
 
-CMD ["uv", "run", "--no-dev", "uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uv", "run", "--no-dev", "uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8081"]

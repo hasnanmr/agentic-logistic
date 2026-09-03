@@ -3,7 +3,7 @@ import { ASK_RESPONSE_FIXTURE, fixtureQueryResult } from "./fixtures";
 
 const DATA_MODE = (process.env.NEXT_PUBLIC_DATA_MODE ?? "api") as "api" | "fixtures";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080";
 
 const API_USERNAME = process.env.NEXT_PUBLIC_API_USERNAME ?? "";
 const API_PASSWORD = process.env.NEXT_PUBLIC_API_PASSWORD ?? "";
