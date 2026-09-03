@@ -54,8 +54,9 @@ def load_dataset(path: str | os.PathLike[str] | None = None) -> pd.DataFrame:
     """Read and validate the logistics CSV.
 
     Raises:
-        DatasetError: if the file is missing, is missing required columns, or
-            contains duplicate order identifiers.
+        DatasetError: if the file is missing, is missing required columns,
+            carries a delivery date before its order date, or contains
+            duplicate order identifiers.
     """
 
     csv_path = _resolve_path(path)
@@ -79,6 +80,17 @@ def load_dataset(path: str | os.PathLike[str] | None = None) -> pd.DataFrame:
             raise DatasetError(
                 f"column '{column}' contains values that are not {DATE_FORMAT} dates"
             ) from error
+
+    # An order cannot be delivered before it was placed. Without this guard a
+    # reversed pair parses fine and produces a *negative* elapsed time, which
+    # silently drags Average Delivery Time down instead of failing. NaT
+    # compares False, so the 30 undelivered rows are unaffected.
+    reversed_dates = int((frame["delivery_date"] < frame["order_date"]).sum())
+    if reversed_dates:
+        raise DatasetError(
+            f"dataset contains {reversed_dates} rows whose delivery_date "
+            "precedes their order_date"
+        )
 
     duplicates = int(frame["order_id"].duplicated().sum())
     if duplicates:

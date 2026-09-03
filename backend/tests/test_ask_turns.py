@@ -1,41 +1,32 @@
-"""Follow-up questions: bounded conversation history on Ask Operations.
+"""Follow-up questions: replayed history and server-side conversation threads.
 
-The conversation stays stateless - the client replays prior turns with each
-request, the server keeps nothing - but the model sees the recent turns so a
-question like "what about the second highest?" can be resolved. The bound is
-10 turns, enforced on the request shape and by the orchestrator.
+There are two ways to continue a conversation. A stateless client replays prior
+turns with each request, bounded at 10 turns, and the server keeps nothing. A
+client that sends back the ``thread_id`` from the previous response lets the
+agent's checkpointer hold the conversation instead, and can drop history
+entirely. Both are asserted here, against the real graph.
 """
 
 from typing import Any
 
+import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
+from langchain_core.messages import AIMessage, HumanMessage
 
-from backend.llm import ToolCall
+from backend.agent import MAX_HISTORY_TURNS, build_agent
+from backend.ingestion import load_dataset
 from backend.main import app
-from backend.orchestrator import MAX_HISTORY_TURNS, answer_question
+from backend.orchestrator import QUERY_TOOL, answer_question
+from backend.tests.scripted_model import ScriptedChatModel, ToolCall, script_for
 
 
 CREDENTIALS = {"APP_USERNAME": "reviewer", "APP_PASSWORD": "s3cret"}
 
 
-class RecordingClient:
-    """Captures what the model would see, then declines to pick a tool."""
-
-    def __init__(self) -> None:
-        self.received_question: str | None = None
-        self.received_history: list[dict[str, str]] | None = None
-
-    def choose_tool(
-        self,
-        question: str,
-        tools: list[dict[str, Any]],
-        system_prompt: str,
-        history: list[dict[str, str]] | None = None,
-    ) -> ToolCall | None:
-        self.received_question = question
-        self.received_history = history
-        return None
+@pytest.fixture(scope="module")
+def dataset() -> pd.DataFrame:
+    return load_dataset("mock_logistics_data.csv")
 
 
 @pytest.fixture()
@@ -50,14 +41,15 @@ def auth() -> tuple[str, str]:
     return (CREDENTIALS["APP_USERNAME"], CREDENTIALS["APP_PASSWORD"])
 
 
-def _turn(index: int) -> dict[str, str]:
-    """One exchange, in the request shape the /api/ask contract uses."""
+def declining_agent() -> tuple[Any, ScriptedChatModel]:
+    """An agent whose model calls no tool, so only the prompt matters."""
 
-    return {"question": f"question {index}?", "answer": f"answer {index}."}
+    model = ScriptedChatModel(script=script_for(None))
+    return build_agent(model), model
 
 
 def _messages(index: int) -> list[dict[str, str]]:
-    """The same exchange in the role/content shape the orchestrator consumes."""
+    """One exchange in the role/content shape the orchestrator consumes."""
 
     return [
         {"role": "user", "content": f"question {index}?"},
@@ -65,51 +57,72 @@ def _messages(index: int) -> list[dict[str, str]]:
     ]
 
 
-def test_history_reaches_the_model_in_order() -> None:
-    stub = RecordingClient()
+def conversation_seen(model: ScriptedChatModel) -> list[tuple[str, str]]:
+    """The user/assistant turns the model was shown, in order.
 
-    answer_question(
-        "follow up?", stub, history=[*_messages(1), *_messages(2)]
-    )
-
-    assert stub.received_history is not None
-    roles = [message["role"] for message in stub.received_history]
-    assert roles == ["user", "assistant", "user", "assistant"]
-    assert stub.received_history[0]["content"] == "question 1?"
-    assert stub.received_history[-1]["content"] == "answer 2."
-    assert stub.received_question == "follow up?"
-
-
-def test_history_is_bounded_to_the_last_ten_turns() -> None:
-    stub = RecordingClient()
-    history = [message for index in range(1, 15) for message in _messages(index)]
-
-    answer_question("follow up?", stub, history=history)
-
-    assert stub.received_history is not None
-    assert len(stub.received_history) == 2 * MAX_HISTORY_TURNS
-    contents = [message["content"] for message in stub.received_history]
-    assert "question 5?" in contents
-    assert "question 4?" not in contents
-    assert stub.received_history[0]["role"] == "user"
-
-
-def _api_turn(index: int) -> dict[str, str]:
-    """One exchange in the *request* shape, which differs from _turn().
-
-    The endpoint takes {question, answer} pairs and expands each into the two
-    role/content messages the orchestrator consumes. Building the payload with
-    _turn() would be rejected for its shape, so a length-bound test written that
-    way would pass without ever exercising the bound.
+    The system prompt and the agent's own scaffolding messages are dropped, so
+    the assertion is about the conversation rather than the harness.
     """
 
-    return {"question": f"question {index}?", "answer": f"answer {index}."}
+    return [
+        ("user" if isinstance(message, HumanMessage) else "assistant", message.text)
+        for message in model.seen[0]
+        if isinstance(message, (HumanMessage, AIMessage))
+    ]
 
 
-def test_request_rejects_more_than_ten_turns(client: TestClient, auth: tuple[str, str]) -> None:
+def test_history_reaches_the_model_in_order(dataset: pd.DataFrame) -> None:
+    agent, model = declining_agent()
+
+    answer_question(
+        "follow up?", agent, dataset, history=[*_messages(1), *_messages(2)]
+    )
+
+    seen = conversation_seen(model)
+    assert [role for role, _ in seen] == [
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+        "user",
+    ]
+    assert seen[0][1] == "question 1?"
+    assert seen[-2][1] == "answer 2."
+    assert seen[-1][1] == "follow up?"
+
+
+def test_history_is_bounded_to_the_last_ten_turns(dataset: pd.DataFrame) -> None:
+    agent, model = declining_agent()
+    history = [message for index in range(1, 15) for message in _messages(index)]
+
+    answer_question("follow up?", agent, dataset, history=history)
+
+    seen = conversation_seen(model)
+    # Ten prior turns of two messages each, plus the new question.
+    assert len(seen) == 2 * MAX_HISTORY_TURNS + 1
+    contents = [text for _, text in seen]
+    assert "question 5?" in contents
+    assert "question 4?" not in contents
+    assert seen[0][0] == "user"
+
+
+def test_empty_history_defaults_to_just_the_question(dataset: pd.DataFrame) -> None:
+    agent, model = declining_agent()
+
+    answer_question("which carrier is slowest?", agent, dataset)
+
+    assert conversation_seen(model) == [("user", "which carrier is slowest?")]
+
+
+def test_request_rejects_more_than_ten_turns(
+    client: TestClient, auth: tuple[str, str]
+) -> None:
     payload = {
         "question": "follow up?",
-        "history": [_api_turn(index) for index in range(MAX_HISTORY_TURNS + 1)],
+        "history": [
+            {"question": f"question {index}?", "answer": f"answer {index}."}
+            for index in range(MAX_HISTORY_TURNS + 1)
+        ],
     }
 
     response = client.post("/api/ask", json=payload, auth=auth)
@@ -123,11 +136,15 @@ def test_request_accepts_exactly_ten_turns(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Keep this contract test independent of provider credentials and network.
-    monkeypatch.setattr("backend.ask_api.get_client", RecordingClient)
+    agent, _ = declining_agent()
+    monkeypatch.setattr("backend.ask_api.get_agent", lambda: agent)
 
     payload = {
         "question": "follow up?",
-        "history": [_api_turn(index) for index in range(MAX_HISTORY_TURNS)],
+        "history": [
+            {"question": f"question {index}?", "answer": f"answer {index}."}
+            for index in range(MAX_HISTORY_TURNS)
+        ],
     }
 
     response = client.post("/api/ask", json=payload, auth=auth)
@@ -136,9 +153,52 @@ def test_request_accepts_exactly_ten_turns(
     assert response.status_code == 200
 
 
-def test_empty_history_defaults_to_no_messages() -> None:
-    stub = RecordingClient()
+# --- server-side threads ----------------------------------------------------
 
-    answer_question("which carrier is slowest?", stub)
 
-    assert stub.received_history == []
+def test_a_thread_id_is_returned_so_the_client_can_continue(
+    dataset: pd.DataFrame,
+) -> None:
+    agent, _ = declining_agent()
+
+    response = answer_question("which carrier is slowest?", agent, dataset)
+
+    assert response.thread_id
+    assert response.thread_id.startswith("ask-")
+
+
+def test_a_thread_carries_the_conversation_without_replayed_history(
+    dataset: pd.DataFrame,
+) -> None:
+    """The second question sees the first one without the client resending it."""
+
+    model = ScriptedChatModel(
+        script=[
+            *script_for(ToolCall(QUERY_TOOL, {"metric": "total_orders"})),
+            *script_for(ToolCall(QUERY_TOOL, {"metric": "delayed_orders"})),
+        ]
+    )
+    agent = build_agent(model)
+
+    first = answer_question("how many orders?", agent, dataset)
+    answer_question(
+        "and how many were late?", agent, dataset, thread_id=first.thread_id
+    )
+
+    # The model's second run opens on the whole thread, not just the new turn.
+    follow_up = [
+        message.text
+        for message in model.seen[-1]
+        if isinstance(message, HumanMessage)
+    ]
+    assert follow_up == ["how many orders?", "and how many were late?"]
+
+
+def test_a_thread_id_is_echoed_back_unchanged(dataset: pd.DataFrame) -> None:
+    agent, _ = declining_agent()
+
+    response = answer_question(
+        "follow up?", agent, dataset, thread_id="ask-fixed-thread"
+    )
+
+    assert response.thread_id == "ask-fixed-thread"

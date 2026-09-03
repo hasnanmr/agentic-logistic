@@ -9,7 +9,7 @@ import { SendIcon, SparkleIcon } from "../components/icons";
 import TraceSidebar from "../components/TraceSidebar";
 import { askQuestion } from "@/lib/api";
 import { ASK_RESPONSE_FIXTURE } from "@/lib/fixtures";
-import { ApiError, type AskResponse, type HistoryTurn } from "@/lib/types";
+import { ApiError, type AskResponse, type AskResult, type HistoryTurn } from "@/lib/types";
 
 const EXAMPLE_QUESTIONS = [
   "Which carrier has the highest delay rate?",
@@ -26,12 +26,37 @@ interface ChatMessage {
   isError?: boolean;
 }
 
+/** Which result block's trace panel is open, if any. */
+interface TraceTarget {
+  message: number;
+  result: number;
+}
+
+/**
+ * A short label for one result block, used when an answer has several.
+ * Taken from the request the agent actually made, so it names what was asked
+ * of the data rather than guessing from the prose.
+ */
+function blockLabel(result: AskResult): string {
+  const request = result.explainability.structured_request;
+  if (request.operation === "forecast") {
+    return `demand forecast, ${request.horizon_weeks} weeks`;
+  }
+  const dimensions = request.dimensions ?? [];
+  return dimensions.length > 0
+    ? `${request.metric} by ${dimensions.join(", ")}`
+    : request.metric;
+}
+
 export default function AskPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [traceIndex, setTraceIndex] = useState<number | null>(null);
+  const [trace, setTrace] = useState<TraceTarget | null>(null);
+  // The server holds the conversation once it hands back a thread; history is
+  // still sent so the first turn and a forgotten thread both work.
+  const [threadId, setThreadId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const turns: HistoryTurn[] = messages
@@ -59,7 +84,8 @@ export default function AskPage() {
     setMessages((current) => [...current, { role: "user", text: trimmed }]);
     setLoading(true);
     try {
-      const response = await askQuestion(trimmed, turns.slice(-MAX_TURNS));
+      const response = await askQuestion(trimmed, turns.slice(-MAX_TURNS), threadId);
+      setThreadId(response.thread_id ?? threadId);
       setMessages((current) => [
         ...current,
         { role: "assistant", text: response.unsupported ? response.unsupported_reason ?? "" : response.answer, response },
@@ -133,25 +159,44 @@ export default function AskPage() {
                   ) : (
                     <>
                       <p className="chat-text">{message.text}</p>
-                      {message.response?.chart && message.response.chart.data.length > 0 ? (
-                        <AskChart chart={message.response.chart} />
-                      ) : null}
-                      {message.response?.table && message.response.table.row_count > 0 ? (
-                        <DataTable result={message.response.table} />
-                      ) : null}
-                      {message.response?.explainability ? (
-                        <button
-                          type="button"
-                          className={`trace-open-button${traceIndex === index ? " is-active" : ""}`}
-                          onClick={() =>
-                            setTraceIndex((current) => (current === index ? null : index))
-                          }
-                          aria-expanded={traceIndex === index}
-                        >
-                          <span className="trace-open-icon" aria-hidden="true" />
-                          {traceIndex === index ? "Hide how this answer was produced" : "How this answer was produced"}
-                        </button>
-                      ) : null}
+                      {/* One block per tool call the agent made. A single
+                          figure renders exactly as it always did; a compound
+                          question adds a labelled block for each part. */}
+                      {(message.response?.results ?? []).map((result, resultIndex) => {
+                        const isOpen =
+                          trace?.message === index && trace?.result === resultIndex;
+                        const several = (message.response?.results.length ?? 0) > 1;
+                        return (
+                          <div className="ask-result-block" key={resultIndex}>
+                            {several ? (
+                              <p className="ask-result-label">{blockLabel(result)}</p>
+                            ) : null}
+                            {result.chart && result.chart.data.length > 0 ? (
+                              <AskChart chart={result.chart} />
+                            ) : null}
+                            {result.table && result.table.row_count > 0 ? (
+                              <DataTable result={result.table} />
+                            ) : null}
+                            <button
+                              type="button"
+                              className={`trace-open-button${isOpen ? " is-active" : ""}`}
+                              onClick={() =>
+                                setTrace(
+                                  isOpen ? null : { message: index, result: resultIndex },
+                                )
+                              }
+                              aria-expanded={isOpen}
+                            >
+                              <span className="trace-open-icon" aria-hidden="true" />
+                              {isOpen
+                                ? "Hide how this was produced"
+                                : several
+                                  ? `How “${blockLabel(result)}” was produced`
+                                  : "How this answer was produced"}
+                            </button>
+                          </div>
+                        );
+                      })}
                     </>
                   )}
                 </div>
@@ -178,7 +223,15 @@ export default function AskPage() {
         {limitReached ? (
           <div className="notice-banner chat-limit">
             Conversation limit of {MAX_TURNS} turns reached. Start a new conversation to continue.
-            <button type="button" className="button-secondary" onClick={() => setMessages([])}>
+            <button
+              type="button"
+              className="button-secondary"
+              onClick={() => {
+                setMessages([]);
+                setThreadId(null);
+                setTrace(null);
+              }}
+            >
               New conversation
             </button>
           </div>
@@ -216,11 +269,14 @@ export default function AskPage() {
       </section>
 
       <TraceSidebar
-        open={traceIndex !== null}
+        open={trace !== null}
         explainability={
-          traceIndex === null ? null : messages[traceIndex]?.response?.explainability ?? null
+          trace === null
+            ? null
+            : messages[trace.message]?.response?.results[trace.result]?.explainability ?? null
         }
-        onClose={() => setTraceIndex(null)}
+        plan={trace === null ? [] : messages[trace.message]?.response?.plan ?? []}
+        onClose={() => setTrace(null)}
       />
     </main>
   );

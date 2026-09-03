@@ -3,10 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import DataTable from "./DataTable";
-import type { Explainability, RequestFilter } from "@/lib/types";
+import type { Explainability, PlanStep, RequestFilter } from "@/lib/types";
 
 interface TraceSidebarProps {
   explainability: Explainability | null;
+  /** The agent's own to-do list for this run; empty for a direct answer. */
+  plan?: PlanStep[];
   open: boolean;
   onClose: () => void;
 }
@@ -23,6 +25,7 @@ const OPERATOR_LABELS: Record<RequestFilter["op"], string> = {
 };
 
 const ALL_SECTIONS = [
+  "plan",
   "pipeline",
   "runtime",
   "metric",
@@ -33,7 +36,21 @@ const ALL_SECTIONS = [
 ] as const;
 type SectionId = (typeof ALL_SECTIONS)[number];
 
-const DEFAULT_OPEN: SectionId[] = ["pipeline", "runtime", "metric", "time", "filters", "forecast"];
+const DEFAULT_OPEN: SectionId[] = [
+  "plan",
+  "pipeline",
+  "runtime",
+  "metric",
+  "time",
+  "filters",
+  "forecast",
+];
+
+const PLAN_STATUS_LABELS: Record<PlanStep["status"], string> = {
+  pending: "to do",
+  in_progress: "in progress",
+  completed: "done",
+};
 
 /** Sub-second runs read better in milliseconds; longer ones in seconds. */
 function formatDuration(ms: number): string {
@@ -85,7 +102,12 @@ function Section({ id, title, badge, isOpen, onToggle, children }: SectionProps)
   );
 }
 
-export default function TraceSidebar({ explainability, open, onClose }: TraceSidebarProps) {
+export default function TraceSidebar({
+  explainability,
+  plan = [],
+  open,
+  onClose,
+}: TraceSidebarProps) {
   const [openSections, setOpenSections] = useState<SectionId[]>(DEFAULT_OPEN);
   const [activeStep, setActiveStep] = useState<number | null>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -135,6 +157,7 @@ export default function TraceSidebar({ explainability, open, onClose }: TraceSid
   const availableSections = ALL_SECTIONS.filter((id) => {
     if (id === "forecast") return forecast_details !== null;
     if (id === "runtime") return runtime !== null;
+    if (id === "plan") return plan.length > 0;
     return true;
   });
   const allOpen = availableSections.every((id) => openSections.includes(id));
@@ -214,6 +237,31 @@ export default function TraceSidebar({ explainability, open, onClose }: TraceSid
               ))}
             </ol>
           </Section>
+
+          {plan.length > 0 ? (
+            <Section
+              id="plan"
+              title="Agent plan"
+              badge={`${plan.filter((step) => step.status === "completed").length}/${plan.length}`}
+              isOpen={openSections.includes("plan")}
+              onToggle={toggleSection}
+            >
+              <p className="trace-note">
+                The steps the agent wrote for itself before running the tools. It
+                only plans when a question has several parts.
+              </p>
+              <ol className="trace-plan">
+                {plan.map((step, index) => (
+                  <li key={index} className={`trace-plan-step is-${step.status}`}>
+                    <span className="trace-plan-text">{step.content}</span>
+                    <span className="trace-plan-status">
+                      {PLAN_STATUS_LABELS[step.status]}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </Section>
+          ) : null}
 
           {runtime ? (
             <Section

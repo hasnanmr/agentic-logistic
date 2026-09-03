@@ -5,8 +5,8 @@
 | Document | Value |
 |---|---|
 | Source PRD | v2.0 |
-| Effort (sum of all tasks) | **~12h20m** — above the source spec's 6–10h guidance. Parallelizing cuts wall-clock, not effort; see "If short on time". |
-| Wall-clock if parallelized | **~5h45m** with 3–4 workers (Wave 0 45m → longest Wave 1 stream, C at 3h15m → Wave 2 1h → Wave 3 45m) |
+| Effort (sum of all tasks) | **~13h35m** — above the source spec's 6–10h guidance. Parallelizing cuts wall-clock, not effort; see "If short on time". |
+| Wall-clock if parallelized | **~6h** with 3–4 workers (Wave 0 45m → longest Wave 1 stream, C at 3h15m → Wave 2 1h15m → Wave 3 45m) |
 | Status | Wave 0 + Streams A/B1/B2/D/E + Wave 2 complete — `schemas.py`, `fixtures.py`, routers, `test_wave0.py`, frontend dashboard + Ask Operations (ports: FE 3001, BE 8080), `test_reconciliation.py` all landed. Ask Operations now supports follow-up questions: stateless 10-turn conversation history replayed by the client per request (`AskRequest.history`), chat UI on /ask, bounded in `test_ask_turns.py` |
 | Dataset | `mock_logistics_data.csv` (400 rows, 2025-01-01 to 2025-12-30, 1 row = 1 order) |
 | Ground-truth KPI values | Total Orders 400 · Delivered Orders 359 · Delayed Orders 55 · On-Time Rate 84.68% · Delay Rate 15.32% · Avg Delivery Time 3.83 days |
@@ -26,6 +26,7 @@ WAVE 0 (serial, blocking, ~45m)
       A: Auth   B1: Data   B2: Query  C: Front-  D: Fore-   E: Orches-   F: Deploy
       (~10m)    +Metrics    Tool      end/Dash   cast       trator       scaffold
                  (~55m)     (~55m)    (~3h15m)   (~1h30m)   (~2h20m)     (~45m)
+      G: Langfuse traceability (~1h15m)
         |          |          |          |          |          |          |
         +----------+----------+----------+----------+----------+----------+
                                     |
@@ -86,10 +87,10 @@ WAVE 0 (serial, blocking, ~45m)
 ```json
 {
   "columns": ["carrier", "delay_rate"],
-  "rows": [["FedEx", 18.2], ["UPS", 12.4]],
-  "row_count": 9,
+  "rows": [["UPS", 50.0], ["USPS", 25.0]],
+  "row_count": 6,
   "metric": "delay_rate",
-  "resolved_time_range": {"start": "2025-08-01", "end": "2025-08-31"},
+  "resolved_time_range": {"start": "2025-11-01", "end": "2025-11-30"},
   "truncated": false
 }
 ```
@@ -100,11 +101,11 @@ WAVE 0 (serial, blocking, ~45m)
   "target": "order_demand",
   "grain": "week",
   "horizon_weeks": 4,
-  "history": [{"period": "2025-W01", "value": 8}],
-  "history_window": {"start": "2025-01-01", "end": "2025-12-30", "observations": 53},
+  "history": [{"period": "2025-W52", "value": 8}],
+  "history_window": {"start": "2025-01-06", "end": "2025-12-28", "observations": 51},
   "forecast": [{"period": "2026-W01", "value": 9.2}],
-  "method": "moving_average_4w",
-  "methodology_note": "4-week moving average over 53 weeks of order history.",
+  "method": "linear_trend_12w",
+  "methodology_note": "12-week trend over 51 complete weeks of order history.",
   "recommendation": {
     "rule": "F > B x 1.10 -> increase capacity by ceil(F - B); F < B x 0.90 -> no increase; else hold",
     "baseline_weekly_orders": 7.5,
@@ -137,8 +138,8 @@ For `operation: "forecast"` answers, `query_plan` is not enough to make the resu
 ```json
 "forecast_details": {
   "horizon_weeks": 4,
-  "method": "moving_average_4w",
-  "history_window": {"start": "2025-01-01", "end": "2025-12-30", "observations": 53},
+  "method": "linear_trend_12w",
+  "history_window": {"start": "2025-01-06", "end": "2025-12-28", "observations": 51},
   "baseline_weekly_orders": 7.5,
   "forecast_level": 8.9,
   "recommendation_rule": "F > B x 1.10 -> increase capacity by ceil(F - B)",
@@ -150,7 +151,7 @@ For `operation: "forecast"` answers, `query_plan` is not enough to make the resu
 **5. AskResponse** — the Ask Operations endpoint's response
 ```json
 {
-  "answer": "FedEx has the highest delay rate at 18.2%.",
+  "answer": "UPS has the highest delay rate at 50.0%.",
   "chart": { "type": "bar", "x": "carrier", "y": "delay_rate", "data": [] },
   "table": { "...contract 2..." },
   "explainability": { "...contract 4..." },
@@ -288,17 +289,17 @@ Required downstream behavior:
 
 *Needs only raw order dates — independent of the metric layer.*
 
-- [x] **D.1** (15 min) `backend/forecast.py`: build the weekly demand series from `order_date` (53 weeks available, 2–28 orders/week).
-- [x] **D.2** (30 min) One basic method — moving average or linear trend — honoring `horizon_weeks` (1–8) from the request. Do not implement two to compare.
+- [x] **D.1** (15 min) `backend/forecast.py`: build the weekly demand series from `order_date` (**51 complete weeks**, 2–28 orders/week — the data starts Wed and ends Tue, so the first and last ISO weeks are part-weeks and are excluded).
+- [x] **D.2** (30 min) One basic method — least-squares trend fitted over the trailing 12 weeks, honoring `horizon_weeks` (1–8) from the request. Do not implement two to compare. Twelve weeks, not four: weekly counts scatter by ~4 orders around a mean of 7.5, so a slope through four points is noise.
 - [x] **D.3** (15 min) Recommendation with **fixed rule values, not placeholders** *(FR-14, PRD §12)*:
   - `B` = mean weekly orders over the **trailing 4 complete weeks** before the forecast start.
-  - `F` = mean of the forecast values across the horizon.
+  - `F` = mean of the forecast values across the horizon. The projection must therefore be fitted over a **wider** window than `B`: a flat 4-week mean would make `F` equal `B` for every dataset and neither threshold could ever be crossed.
   - `F > B × 1.10` → `increase_capacity`, delta = `ceil(F − B)` orders/week.
   - `F < B × 0.90` → `no_increase` (softening demand).
   - otherwise → `hold`.
   - Return `B`, `F`, the delta, the action, and the rule string — the text is assembled here, never by the LLM.
 - [x] **D.4** (10 min) Methodology note + `history_window` (start, end, observation count). *(FR-13)*
-- [x] **D.5** (10 min) Insufficient-history guard: **fewer than 8 complete weeks** → `insufficient_data: true` + reason, no number. The supplied dataset has 53 weeks so this never fires in practice — test it with a deliberately truncated fixture.
+- [x] **D.5** (10 min) Insufficient-history guard: **fewer than 8 complete weeks** → `insufficient_data: true` + reason, no number. The supplied dataset has 51 complete weeks so this never fires in practice — test it with a deliberately truncated fixture.
 - [x] **D.6** (10 min) `backend/forecast_api.py`: expose `POST /api/forecast` returning a ForecastResult.
 
 **Done when:** a 4-week forecast returns values, horizon, method name, methodology note, history window, and a recommendation carrying B/F/delta — all computed in code, none from an LLM; an 6-week-history fixture returns `insufficient_data: true`.
@@ -323,6 +324,18 @@ Required downstream behavior:
 
 **Done when:** the three spec example questions produce correct StructuredRequests against stubs, an out-of-scope question returns `unsupported: true`, and a ranking result yields `bar` / a weekly trend yields `line` / a single KPI yields `null` without any model involvement. *(FR-08)*
 
+### Stream G — Langfuse Traceability (~1h15m)
+
+*Adds operational tracing for the AI request lifecycle without making Langfuse a runtime dependency for answering questions.*
+
+- [ ] **G.1** (10 min) Add the Langfuse SDK and document the required environment variables: `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL`, plus an enable/disable flag if needed. Use deployment secret management or a local untracked `.env`; never commit secret values.
+- [ ] **G.2** (20 min) Create `backend/observability.py` as a no-op-safe adapter that starts and flushes a root trace per Ask Operations request, with configurable host and enabled state. It must fail open: tracing errors must not fail or materially delay the user response.
+- [ ] **G.3** (25 min) Instrument the end-to-end agent lifecycle: root trace for the question/request, generation spans for model calls, spans for query/forecast/decline tool calls, and captured duration, status, errors, selected model, `thread_id`, and deployment environment. Redact API keys and unnecessary personal/sensitive data.
+- [ ] **G.4** (10 min) Correlate the Langfuse trace ID with application request/answer logs and, if the response contract is extended, expose only the non-secret trace ID for support/debugging. Keep the existing explainability payload as the user-facing “how this answer was produced” view.
+- [ ] **G.5** (10 min) Add tests for enabled and disabled tracing, flush/error fallback, redaction, and one trace containing model plus tool observations. Document local setup and production secret configuration in `README.md`.
+
+**Done when:** every `/api/ask` analytics request creates a searchable Langfuse trace containing the model and governed tool steps, trace failures leave the API response unaffected, and no credential or unredacted sensitive value is sent to Langfuse.
+
 ### Stream F — Deployment Scaffolding (~45 min)
 
 *Deploy something trivial early — deployment surprises are the classic end-of-project time sink.*
@@ -344,6 +357,7 @@ Required downstream behavior:
 - [x] **I.3** (15 min) C → backend: flip the API client off fixtures. Verify dashboard numbers match the ground truth and that Ask Operations renders real answers, charts, and explainability.
 - [x] **I.4** (10 min) A → everything: enable the auth guard on all routers; confirm the frontend still works through the gate.
 - [x] **I.5** (10 min) Reconciliation check: the same metric+filter through the dashboard and through Ask Operations returns identical numbers. *(NFR-01 — this is the single most likely place to lose Data Correctness points.)*
+- [ ] **I.6** (15 min) G → E: wire the observability adapter into the live agent/orchestrator boundaries, verify model/tool spans for a real Ask Operations request, and confirm tracing remains non-blocking when Langfuse is unavailable.
 
 ---
 
@@ -368,6 +382,7 @@ Which stream discharges which part of the PRD. Anything not listed here is not b
 | D — Forecast Tool | §12 Forecasting | FR-13, FR-14, NFR-04 (insufficient history) |
 | E — Orchestrator | §9, §9.1, §9.2, §10 (selection rules), §11 Explainability | FR-06, FR-07, FR-08, FR-09, FR-15, NFR-04 (unsupported) |
 | F — Deploy | §15 Deliverables | NFR-05, NFR-06 |
+| G — Langfuse Traceability | Operational observability for §9 AI orchestration and Ask Operations | Trace per request, model/tool spans, correlation ID, redaction, fail-open behavior |
 | Wave 2 (integration) | §14 NFR-01 | NFR-01 — reconciliation is only testable once C and B2 are wired together, so it belongs to task I.5, not to any single stream |
 
 Two requirements are easy to lose because they sit between streams — both are now assigned explicitly:
@@ -387,6 +402,7 @@ Two requirements are easy to lose because they sit between streams — both are 
 | Stream D | `backend/forecast.py`, `backend/forecast_api.py` |
 | Stream E | `backend/orchestrator.py`, `backend/ask_api.py`, `backend/chart_rules.py` |
 | Stream F | deploy config, `.gitignore`, `README.md` |
+| Stream G | `backend/observability.py`, `backend/tests/test_observability.py`, Langfuse dependency/config; Stream G integration edits land in I.6 |
 
 If a stream believes it needs to edit a file it doesn't own, that's a signal the Wave 0 contract was wrong — fix the contract deliberately and tell the other streams, rather than editing across the boundary.
 

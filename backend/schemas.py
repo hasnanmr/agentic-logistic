@@ -10,6 +10,7 @@ from datetime import date
 from typing import Annotated, Any, Literal, Union
 
 from pydantic import (
+    computed_field,
     BaseModel,
     ConfigDict,
     Field,
@@ -61,6 +62,19 @@ FilterOperator = Literal[
     "lte",
 ]
 Scalar = str | int | float | bool | date | None
+
+#: Conversational filler the application answers from templates instead of the
+#: agent - see :mod:`backend.smalltalk`.
+SmalltalkIntent = Literal[
+    "morning",
+    "noon",
+    "afternoon",
+    "evening",
+    "hello",
+    "thanks",
+    "farewell",
+]
+SmalltalkLanguage = Literal["id", "en", "zh"]
 
 
 class ContractModel(BaseModel):
@@ -222,7 +236,7 @@ class ForecastResult(ContractModel):
     history: list[ForecastPoint]
     history_window: HistoryWindow
     forecast: list[ForecastPoint]
-    method: Literal["moving_average_4w"]
+    method: Literal["linear_trend_12w"]
     methodology_note: str
     recommendation: ForecastRecommendation | None
     insufficient_data: bool = False
@@ -261,12 +275,24 @@ class ResolvedFilters(ContractModel):
 
 class ForecastDetails(ContractModel):
     horizon_weeks: Annotated[StrictInt, Field(ge=1, le=8)]
-    method: Literal["moving_average_4w"]
+    method: Literal["linear_trend_12w"]
     history_window: HistoryWindow
     baseline_weekly_orders: float | None
     forecast_level: float | None
     recommendation_rule: str
     insufficient_data: bool
+
+
+class Runtime(ContractModel):
+    """How long the agent took to turn the question into this answer.
+
+    Wall-clock milliseconds, split so a slow answer can be attributed: the
+    model call is network-bound, the computation is our own pandas work.
+    """
+
+    total_ms: Annotated[float, Field(ge=0)]
+    model_ms: Annotated[float, Field(ge=0)]
+    compute_ms: Annotated[float, Field(ge=0)]
 
 
 class Explainability(ContractModel):
@@ -278,6 +304,9 @@ class Explainability(ContractModel):
     query_plan: str
     result_preview: QueryResult
     forecast_details: ForecastDetails | None = None
+    #: Absent only when a response is assembled outside the orchestrator
+    #: (fixtures, older clients); the live API always fills it in.
+    runtime: Runtime | None = None
 
     @model_validator(mode="after")
     def validate_operation_details(self) -> Explainability:
@@ -304,22 +333,133 @@ class ChartSpec(ContractModel):
     data: list[dict[str, Any]]
 
 
-class AskResponse(ContractModel):
+class AskResult(ContractModel):
+    """One computed block: the figures behind a single tool call.
+
+    A deep-agent run may call the tools more than once for a compound
+    question, so an answer is a list of these rather than a single result.
+    Every field is produced by application code from the dataset; ``answer``
+    is composed prose about *this* block, never model output.
+    """
+
     answer: str
     chart: ChartSpec | None
     table: QueryResult | None
-    explainability: Explainability | None
+    explainability: Explainability
+
+
+class CarrierKnowledgeItem(ContractModel):
+    """One source-backed carrier glossary entry."""
+
+    name: str
+    expanded_name: str
+    description: str
+    source_url: str
+
+
+class CarrierKnowledge(ContractModel):
+    items: list[CarrierKnowledgeItem] = Field(min_length=1)
+
+
+class SmalltalkReply(ContractModel):
+    """Marks an answer written from a greeting template, not computed.
+
+    The recognised intent and language travel with it so a client can react to
+    a greeting - a language-matched prompt, say - without parsing the prose.
+    """
+
+    intent: SmalltalkIntent
+    language: SmalltalkLanguage
+
+
+class PlanStep(ContractModel):
+    """One entry of the agent's own to-do list, surfaced for the trace panel."""
+
+    content: str
+    status: Literal["pending", "in_progress", "completed"]
+
+
+class AskResponse(ContractModel):
+    """The Ask Operations payload.
+
+    ``results`` is the source of truth. ``chart``, ``table`` and
+    ``explainability`` are read-only views of the first result, kept so
+    single-result clients need no change; new clients should read ``results``.
+
+    Four shapes are valid, exactly one payload each: an answer backed by
+    ``results``, a ``carrier_knowledge`` glossary answer, a templated
+    ``smalltalk`` reply, and a ``narrated`` reply the agent wrote itself when
+    no tool applied. A refusal carries a reason and no payload.
+    """
+
+    answer: str
+    results: list[AskResult] = Field(default_factory=list)
+    #: The agent's plan when it chose to write one; empty for direct answers.
+    plan: list[PlanStep] = Field(default_factory=list)
+    #: How ``answer`` was produced. "composed" means application code wrote
+    #: every word; "model" means the agent's own prose passed the check that
+    #: every number in it came from a tool result.
+    narration: Literal["composed", "model"] = "composed"
+    #: Conversation thread the run belongs to, so the next question can
+    #: continue it server-side instead of replaying history.
+    thread_id: str | None = None
+    #: Static, source-backed answer for carrier glossary questions. These do
+    #: not require an analytical result or an LLM call.
+    carrier_knowledge: CarrierKnowledge | None = None
+    #: Present when the question was a greeting answered from a template, so
+    #: the response carries prose and nothing to explain.
+    smalltalk: SmalltalkReply | None = None
+    #: True when the agent answered in its own prose because the message
+    #: needed no tool - a capability question the templates do not cover. The
+    #: prose is printed only after passing the numeric grounding check.
+    narrated: bool = False
     unsupported: bool = False
     unsupported_reason: str | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def chart(self) -> ChartSpec | None:
+        return self.results[0].chart if self.results else None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def table(self) -> QueryResult | None:
+        return self.results[0].table if self.results else None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def explainability(self) -> Explainability | None:
+        return self.results[0].explainability if self.results else None
 
     @model_validator(mode="after")
     def validate_supported_shape(self) -> AskResponse:
         if self.unsupported:
             if not self.unsupported_reason:
                 raise ValueError("unsupported responses require unsupported_reason")
+            if (
+                self.results
+                or self.carrier_knowledge is not None
+                or self.smalltalk is not None
+                or self.narrated
+            ):
+                raise ValueError(
+                    "unsupported responses cannot carry results, carrier "
+                    "knowledge, a smalltalk reply, or narrated prose"
+                )
         else:
-            if self.explainability is None:
-                raise ValueError("supported responses require explainability")
+            payloads = (
+                bool(self.results),
+                self.carrier_knowledge is not None,
+                self.smalltalk is not None,
+                self.narrated,
+            )
+            if sum(payloads) != 1:
+                raise ValueError(
+                    "supported responses require exactly one of results, "
+                    "carrier knowledge, a smalltalk reply, or narrated prose"
+                )
+            if self.narrated and not self.answer.strip():
+                raise ValueError("a narrated reply requires an answer")
             if self.unsupported_reason is not None:
                 raise ValueError("supported responses cannot include unsupported_reason")
         return self

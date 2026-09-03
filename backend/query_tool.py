@@ -274,11 +274,27 @@ def run_query(
             truncated=False,
         )
 
-    series = grouped.groupby(request.dimensions, sort=False, dropna=False).apply(
-        metric.compute, include_groups=False
-    )
-    table = series.reset_index()
-    table.columns = [*request.dimensions, metric.name]
+    # Each metric must see the group's *complete* rows.
+    # ``groupby(...).apply(..., include_groups=False)`` drops the grouping
+    # column, which silently breaks any metric that reads the column it is
+    # grouped by: Average Delivery Time by status needs ``status`` to pick the
+    # rows that carry a delivery date, and lost it. Iterating the groups keeps
+    # every column addressable and makes the registry's approved dimensions
+    # honest for every metric, present and future.
+    #
+    # A single dimension is passed as a scalar rather than a one-element list
+    # because pandas yields scalar keys for the former and is mid-deprecation
+    # on the shape of the latter.
+    by = request.dimensions[0] if len(request.dimensions) == 1 else request.dimensions
+    records = [
+        [*(key if isinstance(key, tuple) else (key,)), metric.compute(rows)]
+        for key, rows in grouped.groupby(by, sort=False, dropna=False)
+    ]
+    table = pd.DataFrame(records, columns=[*request.dimensions, metric.name])
+    # Every metric returns a number or None, so this restores the numeric
+    # dtype the old Series carried - which `sort_values` and `na_position`
+    # below both depend on.
+    table[metric.name] = pd.to_numeric(table[metric.name])
 
     if request.sort is not None:
         table = table.sort_values(

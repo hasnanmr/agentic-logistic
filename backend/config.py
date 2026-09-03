@@ -6,10 +6,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Auth
-APP_USERNAME = os.getenv("APP_USERNAME", "reviewer")
-APP_PASSWORD = os.getenv("APP_PASSWORD", "change-me")
-SESSION_SECRET = os.getenv("SESSION_SECRET", "replace-with-a-random-secret")
+# Auth is deliberately absent here. ``backend.auth`` reads APP_USERNAME and
+# APP_PASSWORD from os.environ itself and returns 503 when either is unset, so
+# a deployment that forgets them is locked rather than open. A constant with a
+# fallback would hand any future caller a working credential pair and quietly
+# undo that, so credentials are never mirrored into module state.
 
 # LLM
 LLM_BASE_URL = os.getenv("LLM_BASE_URL") or "https://openrouter.ai/api/v1"
