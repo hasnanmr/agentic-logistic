@@ -87,6 +87,38 @@ The provider is any OpenAI-compatible chat-completions endpoint. `LLM_MODEL`
 must match what that endpoint expects — OpenRouter ids carry a provider prefix
 (`openai/gpt-5.6-luna`), `api.openai.com` ids do not.
 
+## How the numbers are verified
+
+Both the dashboard (`POST /api/query`) and the agent compute through one
+registry, `backend/metrics.py`, over the status semantics in
+`backend/status_rules.py`. So NFR-01 — the two paths must agree — holds by
+construction rather than by discipline: there is no second implementation that
+could drift. The frontend only formats (`KpiCard.tsx`), and every chart is
+built from the rows of the table beside it, so neither can show a different
+number.
+
+On top of that, `backend/tests/test_data_correctness.py` checks each KPI three
+ways, and the three have to meet:
+
+1. an **oracle** that recomputes every KPI from the CSV with the standard
+   library only — no pandas, no application code — transcribed from the
+   definitions in PRD 8 rather than from `metrics.py`;
+2. the **registry** the application computes through;
+3. the **pinned values** in `test_metrics.py` and in `frontend/lib/fixtures.ts`
+   (that second copy is what fixtures mode renders, so it is asserted against
+   the backend rather than trusted).
+
+Point 1 is the one the golden values cannot make. A hard-coded expectation was
+read off the implementation it now guards, so a definition that was wrong from
+the start agrees with itself for ever; an independent transcription of the spec
+disagrees.
+
+The same module sweeps dashboard-versus-agent equality across every metric and
+every dimension either will accept, plus filters, presets and ranking — 66
+combinations rather than three hand-picked ones. Ingestion fails closed on a
+missing file, missing columns, non-ISO dates, a delivery date that precedes its
+order date, duplicate `order_id`s, and unmapped status values.
+
 ## The Ask Operations agent
 
 Ask Operations runs on [deepagents](https://docs.langchain.com/oss/python/deepagents/overview),
@@ -140,12 +172,22 @@ Frontend (`frontend/.env.local`):
 ## Testing
 
 ```bash
-# Run backend tests
+# Run backend and frontend tests
 uv run pytest
+cd frontend && npm test
+
+# Or run both test suites through Make
+make test
+
+# Run frontend tests in watch mode
+cd frontend && npm run test:watch
 
 # Run with coverage
 uv run pytest --cov=backend
 ```
+
+Every push and pull request also runs the backend and frontend unit tests through
+GitHub Actions in `.github/workflows/ci.yml`.
 
 ## Docker
 

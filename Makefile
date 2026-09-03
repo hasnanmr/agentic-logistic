@@ -1,4 +1,4 @@
-.PHONY: setup dev backend frontend test lint docker-build docker-run clean
+.PHONY: setup dev backend frontend test test-frontend lint docker-build docker-run clean
 
 # Setup
 setup:
@@ -19,6 +19,10 @@ frontend:
 # Testing
 test:
 	uv run pytest
+	$(MAKE) test-frontend
+
+test-frontend:
+	cd frontend && npm test
 
 test-cov:
 	uv run pytest --cov=backend --cov-report=term-missing
