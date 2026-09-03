@@ -1,7 +1,10 @@
 name: CI
 
 on:
+  # Pull-request branches are covered by the pull_request event; without this
+  # filter every push to a PR branch ran the whole workflow twice.
   push:
+    branches: [main]
   pull_request:
 
 permissions:
@@ -16,6 +19,14 @@ jobs:
     name: Backend unit tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+
+    env:
+      # The dependency tree is large (deepagents pulls in langchain, anthropic,
+      # google-genai, ...). Compiling bytecode at install time is parallel and
+      # lands inside the cached .venv; leaving it to import time is serial and
+      # is paid again on every run - that was the bulk of the test step.
+      UV_COMPILE_BYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
 
     steps:
       - name: Check out repository
@@ -37,12 +48,18 @@ jobs:
         with:
           path: .venv
           key: ${{ runner.os }}-python-3.11-uv-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+          # A stale venv is still worth restoring: uv sync reconciles it to the
+          # lock file and the compiled bytecode of everything unchanged is kept.
+          restore-keys: |
+            ${{ runner.os }}-python-3.11-uv-
 
       - name: Install backend dependencies
         run: uv sync --locked --no-install-project
 
       - name: Run backend unit tests
-        run: uv run --no-sync pytest
+        # --durations keeps the cost of the suite visible in the log, so a slow
+        # test is attributable instead of hiding inside the step total.
+        run: uv run --no-sync pytest -q --durations=15 -p no:cacheprovider
 
   frontend-tests:
     name: Frontend unit tests
