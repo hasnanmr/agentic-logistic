@@ -34,11 +34,24 @@ FORECAST_REQUEST_FIXTURE = StructuredRequest.model_validate(
     }
 )
 
+# What ``run_query`` returns for QUERY_REQUEST_FIXTURE: delay_rate by carrier,
+# US-E/US-W, ``previous_month``. The preset is anchored to the data's last
+# order date (2025-12-30) rather than to today, so the window is November, and
+# November is a thin month - four of the six carriers deliver nothing late.
+# Kept as the engine computes it, zeros included; a tidier set of numbers here
+# would only be a nicer-looking lie.
 QUERY_RESULT_FIXTURE = QueryResult.model_validate(
     {
         "columns": ["carrier", "delay_rate"],
-        "rows": [["FedEx", 18.2], ["UPS", 12.4]],
-        "row_count": 2,
+        "rows": [
+            ["UPS", 50.0],
+            ["USPS", 25.0],
+            ["LaserShip", 0.0],
+            ["FedEx", 0.0],
+            ["Royal Mail", 0.0],
+            ["DPD", 0.0],
+        ],
+        "row_count": 6,
         "metric": "delay_rate",
         "resolved_time_range": {"start": "2025-11-01", "end": "2025-11-30"},
         "truncated": False,
@@ -209,19 +222,23 @@ FORECAST_EXPLAINABILITY_FIXTURE = Explainability.model_validate(
 
 ASK_RESPONSE_FIXTURE = AskResponse.model_validate(
     {
-        "answer": "FedEx has the highest delay rate at 18.2%.",
+        "answer": "UPS has the highest delay rate at 50.0%.",
         # One block per tool call. `chart`, `table` and `explainability` are
         # read-only views of the first block, so they are not supplied here.
         "results": [
             {
-                "answer": "FedEx has the highest delay rate at 18.2%.",
+                "answer": "UPS has the highest delay rate at 50.0%.",
                 "chart": {
                     "type": "bar",
                     "x": "carrier",
                     "y": "delay_rate",
                     "data": [
-                        {"carrier": "FedEx", "delay_rate": 18.2},
-                        {"carrier": "UPS", "delay_rate": 12.4},
+                        {"carrier": "UPS", "delay_rate": 50.0},
+                        {"carrier": "USPS", "delay_rate": 25.0},
+                        {"carrier": "LaserShip", "delay_rate": 0.0},
+                        {"carrier": "FedEx", "delay_rate": 0.0},
+                        {"carrier": "Royal Mail", "delay_rate": 0.0},
+                        {"carrier": "DPD", "delay_rate": 0.0},
                     ],
                 },
                 "table": QUERY_RESULT_FIXTURE.model_dump(mode="json"),

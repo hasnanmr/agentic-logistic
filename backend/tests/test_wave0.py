@@ -6,13 +6,14 @@ import pandas as pd
 import pytest
 from pydantic import ValidationError
 
-from backend.answers import forecast_explainability
+from backend.answers import forecast_explainability, query_explainability
 from backend.fixtures import (
     ALL_FIXTURES,
     FORECAST_REQUEST_FIXTURE,
     QUERY_REQUEST_FIXTURE,
 )
 from backend.forecast import run_forecast
+from backend.ingestion import get_dataset
 from backend.query_tool import run_query
 from backend.main import app
 from backend.schemas import StructuredRequest
@@ -89,21 +90,50 @@ def test_forecast_fixture_history_and_horizon_do_not_overlap() -> None:
     assert spanned == result.history_window.observations
 
 
-def test_query_fixture_time_range_matches_its_own_preset() -> None:
-    """The resolved window has to be what the request's preset resolves to.
+def test_query_fixture_is_what_the_engine_actually_returns() -> None:
+    """Running the fixture's own request must reproduce the fixture.
 
     ``previous_month`` is anchored to the dataset's last order date, not to
     today, so a fixture naming any other month silently contradicts the
-    request it ships beside.
+    request it ships beside - and rows from some other window contradict it
+    twice over.
     """
 
-    resolved = run_query(QUERY_REQUEST_FIXTURE.root).resolved_time_range
-    for fixture_range in (
-        ALL_FIXTURES["query_result"].resolved_time_range,
-        ALL_FIXTURES["explainability"].resolved_filters.time_range,
-    ):
-        assert fixture_range is not None
-        assert (fixture_range.start, fixture_range.end) == (resolved.start, resolved.end)
+    replayed = run_query(QUERY_REQUEST_FIXTURE.root)
+
+    assert replayed.model_dump(mode="json") == ALL_FIXTURES["query_result"].model_dump(
+        mode="json"
+    )
+
+
+def test_query_explainability_fixture_is_derived_from_the_result() -> None:
+    """answers.py assembles this from the result; the fixture must agree."""
+
+    fixture = ALL_FIXTURES["explainability"]
+    rebuilt = query_explainability(
+        fixture.question,
+        QUERY_REQUEST_FIXTURE.root,
+        ALL_FIXTURES["query_result"],
+        get_dataset(),
+    )
+
+    assert rebuilt.model_dump(mode="json") == fixture.model_dump(mode="json")
+
+
+def test_the_ask_response_fixture_agrees_with_the_blocks_it_embeds() -> None:
+    """The headline answer must name the row the table actually puts first."""
+
+    response = ALL_FIXTURES["ask_response"]
+    block = response.results[0]
+    top_carrier, top_rate = ALL_FIXTURES["query_result"].rows[0]
+
+    assert response.answer == block.answer
+    assert str(top_carrier) in block.answer
+    assert f"{top_rate}%" in block.answer
+    assert block.chart is not None
+    assert [point[block.chart.x] for point in block.chart.data] == [
+        row[0] for row in ALL_FIXTURES["query_result"].rows
+    ]
 
 
 def test_all_router_stubs_are_registered() -> None:
@@ -144,10 +174,10 @@ def test_contract_examples_allow_response_previews() -> None:
     query_result = QueryResult.model_validate(
         {
             "columns": ["carrier", "delay_rate"],
-            "rows": [["FedEx", 18.2], ["UPS", 12.4]],
+            "rows": [["UPS", 50.0], ["USPS", 25.0]],
             "row_count": 9,
             "metric": "delay_rate",
-            "resolved_time_range": {"start": "2025-08-01", "end": "2025-08-31"},
+            "resolved_time_range": {"start": "2025-11-01", "end": "2025-11-30"},
             "truncated": False,
         }
     )
@@ -156,27 +186,47 @@ def test_contract_examples_allow_response_previews() -> None:
             "target": "order_demand",
             "grain": "week",
             "horizon_weeks": 4,
-            "history": [{"period": "2025-W01", "value": 8}],
+            # One history point out of 51 - the preview this test is about.
+            # The point is still the real last complete week, and the horizon
+            # still starts the week after it: truncating a series must not be
+            # an excuse to invent one.
+            "history": [{"period": "2025-W52", "value": 8}],
             "history_window": {
-                "start": "2025-01-01",
-                "end": "2025-12-30",
-                "observations": 53,
+                "start": "2025-01-06",
+                "end": "2025-12-28",
+                "observations": 51,
             },
             "forecast": [{"period": "2026-W01", "value": 9.2}],
             "method": "linear_trend_12w",
-            "methodology_note": "12-week trend over 53 weeks of order history.",
+            "methodology_note": "12-week trend over 51 complete weeks of order history.",
             "recommendation": {
-                "rule": "F > B x 1.10 -> increase capacity by ceil(F - B); F < B x 0.90 -> no increase; else hold",
+                "rule": (
+                    "F = mean of the projected values across the horizon; B = mean "
+                    "weekly orders over the trailing 4 weeks. F > B x 1.10 -> "
+                    "increase capacity by ceil(F - B); F < B x 0.90 -> no increase; "
+                    "otherwise hold."
+                ),
                 "baseline_weekly_orders": 7.5,
-                "forecast_level": 8.9,
+                # F is the mean of the projection, and the projection is one
+                # value here; 9.2 > 7.5 x 1.10, so the action follows the rule.
+                "forecast_level": 9.2,
                 "delta_orders_per_week": 2,
                 "action": "increase_capacity",
-                "text": "Increase capacity by about 2 orders/week.",
+                "text": (
+                    "Forecast averages 9.20 orders/week against a trailing 4-week "
+                    "baseline of 7.50 (+22.7%), above the 10% threshold - consider "
+                    "capacity for about 2 more order(s) per week."
+                ),
             },
             "insufficient_data": False,
             "insufficient_data_reason": None,
         }
     )
 
+    # The point of both examples: a preview carries fewer rows than the result
+    # counts, and the contract has to accept that without the two numbers
+    # being read as a contradiction.
     assert query_result.row_count == 9
+    assert len(query_result.rows) < query_result.row_count
     assert forecast_result.horizon_weeks == 4
+    assert len(forecast_result.history) < forecast_result.history_window.observations

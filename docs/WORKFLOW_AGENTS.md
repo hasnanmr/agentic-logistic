@@ -256,8 +256,8 @@ status, jadi ratenya pasti 100% atau 0%. Registry menyimpan daftarnya di
 
 **Algoritma:**
 1. Agregasi order per ISO week (hanya minggu lengkap)
-2. Hitung 4-week moving average
-3. Proyeksi ke horizon yang diminta
+2. Fit garis tren kuadrat-terkecil pada 12 minggu terakhir
+3. Perpanjang garis itu sepanjang horizon, dilantai di nol
 4. Bandingkan dengan trailing baseline 4 minggu
 5. Susun rekomendasi kapasitas
 

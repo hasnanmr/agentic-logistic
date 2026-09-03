@@ -87,10 +87,10 @@ WAVE 0 (serial, blocking, ~45m)
 ```json
 {
   "columns": ["carrier", "delay_rate"],
-  "rows": [["FedEx", 18.2], ["UPS", 12.4]],
-  "row_count": 9,
+  "rows": [["UPS", 50.0], ["USPS", 25.0]],
+  "row_count": 6,
   "metric": "delay_rate",
-  "resolved_time_range": {"start": "2025-08-01", "end": "2025-08-31"},
+  "resolved_time_range": {"start": "2025-11-01", "end": "2025-11-30"},
   "truncated": false
 }
 ```
@@ -151,7 +151,7 @@ For `operation: "forecast"` answers, `query_plan` is not enough to make the resu
 **5. AskResponse** — the Ask Operations endpoint's response
 ```json
 {
-  "answer": "FedEx has the highest delay rate at 18.2%.",
+  "answer": "UPS has the highest delay rate at 50.0%.",
   "chart": { "type": "bar", "x": "carrier", "y": "delay_rate", "data": [] },
   "table": { "...contract 2..." },
   "explainability": { "...contract 4..." },

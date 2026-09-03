@@ -35,7 +35,10 @@ describe("ASK_RESPONSE_FIXTURE", () => {
   it("contains a complete answer compatible with the response contract", () => {
     expect(ASK_RESPONSE_FIXTURE.unsupported).toBe(false);
     expect(ASK_RESPONSE_FIXTURE.results).toHaveLength(1);
-    expect(ASK_RESPONSE_FIXTURE.chart?.data[0]).toEqual({ carrier: "FedEx", delay_rate: 18.2 });
+    // The headline row, and it has to be the one the table puts first: the
+    // fixtures mode and the live API must not disagree about who is worst.
+    expect(ASK_RESPONSE_FIXTURE.chart?.data[0]).toEqual({ carrier: "UPS", delay_rate: 50.0 });
+    expect(ASK_RESPONSE_FIXTURE.answer).toContain("UPS");
     expect(ASK_RESPONSE_FIXTURE.table).toBe(CARRIER_RESULT_FIXTURE);
     expect(ASK_RESPONSE_FIXTURE.explainability?.result_preview).toBe(CARRIER_RESULT_FIXTURE);
   });

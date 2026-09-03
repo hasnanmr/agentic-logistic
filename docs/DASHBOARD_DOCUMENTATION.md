@@ -179,7 +179,9 @@ Klik tombol "How this answer was produced" untuk melihat:
 
 Ketika bertanya tentang prediksi:
 - Menampilkan **actual data** (garis solid) vs **forecast** (garis putus-putus)
-- Menggunakan metode **4-week moving average**
+- Menggunakan **garis tren kuadrat-terkecil** yang di-fit pada 12 minggu terakhir
+  (12 minggu, bukan 4: sebaran mingguan ±4 order pada rata-rata 7.5 membuat
+  kemiringan dari 4 titik hampir seluruhnya derau)
 - Memberikan rekomendasi berdasarkan tren
 
 ### Batasan

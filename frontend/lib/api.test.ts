@@ -72,9 +72,13 @@ describe("runQuery", () => {
     process.env.NEXT_PUBLIC_DATA_MODE = "fixtures";
 
     const { askQuestion } = await loadApi();
+    const { ASK_RESPONSE_FIXTURE } = await import("./fixtures");
     const response = await askQuestion("Which carrier is most delayed?", [], null);
 
-    expect(response.answer).toContain("FedEx");
+    // Compared with the fixture rather than a carrier name: this test is about
+    // fixture mode answering without a request, and pinning the name here is
+    // what made the demo data drift away from what the backend computes.
+    expect(response.answer).toBe(ASK_RESPONSE_FIXTURE.answer);
     expect(response.thread_id).toBe("ask-fixture");
     expect(fetch).not.toHaveBeenCalled();
   });
