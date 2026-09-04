@@ -51,9 +51,10 @@ Dua jalur masuk angka salah dari sisi lain juga tertutup:
 - **Frontend tidak menghitung apa pun.** `KpiCard.tsx` hanya memformat
   (`toFixed`, `Intl.NumberFormat`). Browser tidak bisa memunculkan angka yang
   berbeda dari server.
-- **Chart selalu turunan tabel.** `chart_rules.py` membangun `chart.data` dari
-  `result.rows` yang sama, jadi chart tidak bisa bercerita lain dari tabel di
-  sebelahnya.
+- **Chart Ask Operations selalu turunan tabel.** `chart_rules.py` membangun
+  `chart.data` dari `result.rows` yang sama, jadi chart pada result block tidak
+  bisa bercerita lain dari tabel di sebelahnya. Dua chart utama dashboard adalah
+  visualisasi tetap yang juga memakai hasil query backend yang sama.
 
 ## Triangulasi tiga arah
 
@@ -142,7 +143,7 @@ dipercaya menolak dimuat, bukan dihitung diam-diam:
 | Tanggal format `%Y-%m-%d` | format eksplisit, bukan inferensi (PRD 7.1) |
 | **`delivery_date` ≥ `order_date`** | lihat di bawah |
 | `order_id` unik | mencegah order terhitung ganda |
-| Status dikenal | status tak terpetakan akan hilang dari semua bucket |
+| Status dikenal | status tak terpetakan membuat ingestion gagal, bukan diam-diam hilang |
 
 ### Kenapa urutan tanggal perlu dijaga
 

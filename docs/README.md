@@ -2,6 +2,9 @@
 
 Dokumentasi proyek AI Logistics Analytics Dashboard.
 
+README utama di root ([`../README.md`](../README.md)) adalah referensi setup,
+environment variable, deployment, batasan, dan alur sistem yang paling lengkap.
+
 ## Documents
 
 | Document | Description |
@@ -10,6 +13,7 @@ Dokumentasi proyek AI Logistics Analytics Dashboard.
 | [WORKFLOW_AGENTS.md](WORKFLOW_AGENTS.md) | Arsitektur dan alur kerja AI agent |
 | [DASHBOARD_DOCUMENTATION.md](DASHBOARD_DOCUMENTATION.md) | Panduan dashboard dan komponen frontend |
 | [DATA_CORRECTNESS.md](DATA_CORRECTNESS.md) | Cara angka dashboard dan agent dibuktikan benar |
+| [../Task_Breakdown_MVP.md](../Task_Breakdown_MVP.md) | Rencana kerja dan status implementasi MVP |
 
 ## Quick Links
 

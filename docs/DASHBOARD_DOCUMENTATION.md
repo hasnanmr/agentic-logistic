@@ -1,295 +1,236 @@
-# AI Logistics Analytics Dashboard - Dokumentasi
-
-## Daftar Isi
-1. [Overview](#overview)
-2. [Tech Stack](#tech-stack)
-3. [Alur Onboarding](#alur-onboarding)
-4. [Halaman Dashboard](#halaman-dashboard)
-5. [Halaman Ask Operations](#halaman-ask-operations)
-6. [Navigasi](#navigasi)
-7. [API Endpoints](#api-endpoints)
-8. [Arsitektur & Keamanan](#arsitektur--keamanan)
-
----
+# AI Logistics Analytics Dashboard — Dokumentasi
 
 ## Overview
 
-AI Logistics Analytics Dashboard adalah aplikasi web untuk memantau dan menganalisis data operasional logistik. Dashboard menyediakan:
-- **Visualisasi KPI** secara real-time
-- **Filter data** berdasarkan tanggal, carrier, dan region
-- **Tanya jawab AI** menggunakan bahasa alami
-- **Forecasting** permintaan 4 minggu ke depan
+Dashboard ini menyediakan dua antarmuka untuk dataset logistik read-only:
 
----
+- **Operations Dashboard (`/`)** untuk KPI, tren mingguan, performa carrier,
+  filter, dan tabel.
+- **Ask Operations (`/ask`)** untuk pertanyaan bahasa alami, query terarah,
+  forecast demand mingguan, chart, tabel, dan explainability.
 
-## Tech Stack
+Dataset dimuat sekali ke pandas `DataFrame`. Tidak ada endpoint untuk membuat,
+mengubah, atau menghapus data.
 
-| Layer | Teknologi |
-|-------|-----------|
+## Tech stack
+
+| Layer | Implementasi |
+|---|---|
 | Frontend | Next.js 15, React 19, TypeScript, Recharts |
-| Backend | FastAPI, Python 3.11+, Pandas |
-| AI/LLM | LangChain, OpenRouter (GPT-5.6-luna) |
-| Styling | Pure CSS dengan CSS Custom Properties |
-| Deployment | Docker, Railway |
+| Backend | FastAPI, Python 3.11+, pandas, Uvicorn |
+| AI | deepagents/LangChain dengan model chat OpenAI-compatible |
+| Styling | CSS custom properties |
+| Deployment | Docker dan Railway configuration |
 
----
+Model default adalah `openai/gpt-5.6-luna` melalui OpenRouter. Provider lain
+dapat dipakai selama kompatibel dengan Chat Completions OpenAI dan model id-nya
+sesuai dengan provider tersebut.
 
-## Alur Onboarding
-
-### 1. Setup Environment
+## Setup singkat
 
 ```bash
-# Clone repository
-git clone <repo-url>
-cd Logistic-web-dashboard
-
-# Setup backend
 cp .env.example .env
-# Edit .env dengan credentials:
-# APP_USERNAME=admin
-# APP_PASSWORD=your-secure-password
-# OPENROUTER_API_KEY=your-api-key
-
-# Install dependencies
+cp frontend/.env.example frontend/.env.local
 make setup
-```
-
-### 2. Menjalankan Aplikasi
-
-```bash
-# Jalankan backend + frontend sekaligus
 make dev
-
-# Atau jalankan terpisah:
-# Backend (port 8080)
-uv run uvicorn backend.main:app --reload --port 8080
-
-# Frontend (port 3001)
-cd frontend && npm run dev
 ```
 
-### 3. Mengakses Dashboard
+Buka `http://localhost:3001`. Backend berjalan di `http://localhost:8080`,
+dokumentasi API ada di `http://localhost:8080/docs`, dan health check publik ada
+di `http://localhost:8080/health`.
 
-Buka browser ke `http://localhost:3001`
+API yang dilindungi membutuhkan HTTP Basic Auth. Isi `APP_USERNAME` dan
+`APP_PASSWORD` di `.env`, lalu samakan dengan `NEXT_PUBLIC_API_USERNAME` dan
+`NEXT_PUBLIC_API_PASSWORD` di `frontend/.env.local`. Tidak ada halaman login;
+frontend mengirim header Basic Auth pada setiap request.
 
-**Autentikasi:**
-- Tidak ada halaman login
-- Kredensial dikirim via HTTP Basic Auth di setiap request
-- Username/password dikonfigurasi di environment variables
-- Frontend menggunakan `NEXT_PUBLIC_API_USERNAME` dan `NEXT_PUBLIC_API_PASSWORD`
+Lihat [ONBOARDING.md](ONBOARDING.md) untuk setup dan [README.md](../README.md)
+untuk seluruh environment variable serta deployment.
 
----
+## Operations Dashboard (`/`)
 
-## Halaman Dashboard (`/`)
+### KPI cards
 
-Halaman utama yang menampilkan overview operasional logistik.
+Dashboard menampilkan enam KPI:
 
-### Komponen KPI Cards
+| KPI | Definisi |
+|---|---|
+| Total Orders | Jumlah `order_id` unik |
+| Delivered Orders | Status `delivered` + `delayed` |
+| Delayed Orders | Status `delayed` |
+| On-Time Rate | `delivered / (delivered + delayed) × 100` |
+| Delay Rate | `delayed / (delivered + delayed) × 100` |
+| Average Delivery Time | Rata-rata hari dari `order_date` ke `delivery_date` untuk status `delivered`, `delayed`, dan `exception` yang memiliki tanggal delivery |
 
-6 kartu metrik utama yang ditampilkan di bagian atas:
+Pada dataset bawaan, nilainya adalah 400, 359, 55, 84.68%, 15.32%, dan 3.83
+hari. Kartu Average Delivery Time menampilkan basis `n=370`, karena 11 order
+`exception` yang memiliki tanggal delivery ikut dihitung. Status `exception`
+tidak masuk denominator rate.
 
-| KPI | Penjelasan | Warna |
-|-----|------------|-------|
-| **Total Orders** | Jumlah total order | Netral |
-| **Delivered Orders** | Order yang sudah terkirim (on-time + delayed) | Biru |
-| **Delayed Orders** | Order yang terlambat | Merah |
-| **On-Time Rate** | Persentase pengiriman tepat waktu | Hijau |
-| **Delay Rate** | Persentase keterlambatan | Merah |
-| **Avg Delivery Time** | Rata-rata waktu pengiriman (hari) | Biru |
+### Chart dan tabel
 
-### Charts
+Dashboard memiliki:
 
-1. **Order Volume by Week**
-   - Area chart menampilkan volume order per minggu
-   - Berguna untuk melihat tren permintaan
+1. **Order volume by week** — area chart berdasarkan jumlah order per ISO week.
+2. **On-time vs delayed by carrier** — stacked bar chart. Segmen On-time
+   dihitung sebagai delivered dikurangi delayed; segmen Delayed berisi status
+   `delayed`.
+3. **Carrier performance** — tabel dengan `total_orders`,
+   `delivered_orders`, `delayed_orders`, `on_time_rate`, `delay_rate`, dan
+   `avg_delivery_time`. Header kolom dapat diklik untuk sorting di browser.
 
-2. **On-time vs Delayed by Carrier**
-   - Stacked bar chart perbandingan on-time vs delayed per carrier
-   - Membantu identifikasi carrier bermasalah
+Jika query valid tidak menghasilkan baris, UI menampilkan empty state “No orders
+match these filters”, filter aktif, dan opsi **Clear filters**.
 
-### Carrier Performance Table
+### Filter
 
-Tabel sortable yang menampilkan performa per carrier:
-- Total orders
-- Delivered orders
-- Delayed orders
-- Delay rate (%)
+Filter yang tersedia:
 
-Klik header kolom untuk mengurutkan data.
+- **Date range:** Full year (2025), Last 90 days of data
+  (`2025-10-02`–`2025-12-30`), Last 30 days of data
+  (`2025-12-01`–`2025-12-30`), atau rentang custom.
+- **Carrier:** daftar carrier dari API.
+- **Region:** daftar region dari API.
 
-### Filter Bar
+Setiap perubahan filter memanggil ulang `POST /api/query`. Tombol **Reset** dan
+filter chips menghapus filter secara individual atau sekaligus.
 
-| Filter | Opsi |
-|--------|------|
-| **Date Range** | Full Year 2025, Last 90 Days, Last 30 Days, Custom |
-| **Carrier** | Dropdown dari data API |
-| **Region** | Dropdown dari data API |
+## Ask Operations (`/ask`)
 
-- Tombol **Reset** untuk menghapus semua filter
-- **Filter chips** menampilkan filter aktif dengan tombol hapus
+Input pertanyaan dibatasi 500 karakter. Tekan Enter atau tombol Send. Maksimal
+10 turn tersimpan di UI; setelah itu pengguna harus memilih **New conversation**.
 
-### Loading & Empty State
+Contoh:
 
-- **Skeleton loading** saat data sedang dimuat
-- **Empty state** ketika filter tidak menghasilkan data, dengan opsi clear filters
+- “Which carrier has the highest delay rate?”
+- “How many orders were delivered last month?”
+- “Forecast demand for the next 4 weeks.”
 
----
+Jawaban analitik dapat menampilkan beberapa result block, satu untuk setiap
+tool call. Setiap block dapat berisi teks jawaban, chart otomatis, tabel hasil,
+dan tombol **How this answer was produced**.
 
-## Halaman Ask Operations (`/ask`)
+Chart otomatis memakai `line` untuk satu dimensi waktu dan `bar` untuk satu
+dimensi kategori. Query scalar atau query dengan lebih dari satu dimensi tidak
+mendapat chart otomatis. Forecast selalu memakai line chart dengan actual solid
+dan forecast dashed.
 
-Interface chat AI untuk bertanya tentang data logistik menggunakan bahasa alami.
+### Explainability
 
-### Cara Menggunakan
+Trace sidebar dapat menampilkan agent plan, query plan, runtime server-side,
+definisi dan basis metric, time range, filter, detail forecast, serta preview
+hasil. Untuk forecast, time range diberi label **history window** agar tidak
+disalahartikan sebagai periode laporan.
 
-1. Ketik pertanyaan di input field (maks 500 karakter)
-2. Tekan Enter atau klik tombol Send
-3. AI akan memproses dan memberikan jawaban
+### Forecasting
 
-### Contoh Pertanyaan
+Forecast hanya mendukung aggregate `order_demand` pada grain mingguan dengan
+horizon 1–8 minggu. Implementasinya:
 
-- "Which carrier has the highest delay rate?"
-- "How many orders were delivered last month?"
-- "Forecast demand for the next 4 weeks."
-- "Show me orders from Jakarta region"
+1. menghitung order per ISO week yang lengkap;
+2. mengisi minggu tanpa order sebagai nol;
+3. memasang least-squares trend pada sampai 12 minggu lengkap terakhir;
+4. memproyeksikan horizon dan membatasi hasil minimum nol; dan
+5. membandingkan rata-rata forecast dengan baseline trailing 4 minggu.
 
-### Response Components
+Forecast di atas 10% dari baseline merekomendasikan peningkatan kapasitas,
+forecast di bawah 10% merekomendasikan tidak menambah kapasitas, dan sisanya
+merekomendasikan menahan kapasitas. Kurang dari 8 minggu lengkap menghasilkan
+`insufficient_data`, bukan angka forecast buatan.
 
-Setiap jawaban AI bisa berisi:
+## API endpoints
 
-| Komponen | Deskripsi |
-|----------|-----------|
-| **Answer Text** | Jawaban dalam bentuk teks |
-| **Chart** | Bar chart atau line chart (otomatis dipilih) |
-| **Data Table** | Tabel data hasil query |
-| **Explainability** | Panel penjelasan cara jawaban dihasilkan |
+| Endpoint | Method | Auth | Keterangan |
+|---|---|---|---|
+| `/health` | GET | Tidak | Health check |
+| `/api/session` | GET | Basic | Memvalidasi credentials dan mengembalikan username |
+| `/api/query` | POST | Basic | Query terstruktur tervalidasi |
+| `/api/ask` | POST | Basic | Q&A dengan agent dan tool terkontrol |
+| `/api/forecast` | POST | Basic | Forecast mingguan langsung tanpa agent |
 
-### Explainability Panel (Trace Sidebar)
+`POST /api/ask` menerima `question`, optional `history` maksimal 10 turn,
+dan optional `thread_id`. Response analitik memakai `results[]` sebagai sumber
+kebenaran; field `chart`, `table`, dan `explainability` di tingkat atas adalah
+view dari result pertama untuk kompatibilitas client lama.
 
-Klik tombol "How this answer was produced" untuk melihat:
+## Arsitektur dan keamanan
 
-- **Query Plan** - Langkah-langkah pemrosesan
-- **Runtime** - Waktu eksekusi (total, model, compute)
-- **Metric** - Definisi metrik yang digunakan
-- **Time Range** - Rentang waktu yang dianalisis
-- **Filters** - Filter yang diterapkan
-- **Forecast Details** - Detail forecasting (jika ada)
-- **Result Preview** - Preview data mentah
-
-### Fitur Forecasting
-
-Ketika bertanya tentang prediksi:
-- Menampilkan **actual data** (garis solid) vs **forecast** (garis putus-putus)
-- Menggunakan **garis tren kuadrat-terkecil** yang di-fit pada 12 minggu terakhir
-  (12 minggu, bukan 4: sebaran mingguan ±4 order pada rata-rata 7.5 membuat
-  kemiringan dari 4 titik hampir seluruhnya derau)
-- Memberikan rekomendasi berdasarkan tren
-
-### Batasan
-
-- Maksimal **10 percakapan** per session
-- Pertanyaan yang tidak didukung akan mendapat penjelasan + daftar kemampuan
-- Jika AI service tidak tersedia, menampilkan data fixture sample
-
----
-
-## Navigasi
-
-Top navigation bar dengan 2 menu:
-
-| Menu | Route | Fungsi |
-|------|-------|--------|
-| **Dashboard** | `/` | Halaman utama KPI dan charts |
-| **Ask Operations** | `/ask` | Chat AI untuk analisis data |
-
----
-
-## API Endpoints
-
-| Endpoint | Method | Auth | Fungsi |
-|----------|--------|------|--------|
-| `/health` | GET | No | Health check |
-| `/api/session` | GET | Basic | Validasi credentials |
-| `/api/query` | POST | Basic | Query data terstruktur |
-| `/api/ask` | POST | Basic | Tanya jawab AI |
-| `/api/forecast` | POST | Basic | Prediksi permintaan |
-
----
-
-## Arsitektur & Keamanan
-
-### Anti-Hallucination Design
-
-- LLM **hanya memilih tools dan argumen**, tidak pernah melihat data
-- Semua angka **dihitung oleh pandas**, bukan oleh model
-- Teks jawaban **disusun oleh aplikasi**, bukan oleh model
-- Modul `grounding.py` memverifikasi setiap angka dalam jawaban
-
-### Data Flow
-
-```
-User Question → LLM (tool selection) → Pandas (computation) → Composed Answer
+```text
+Question
+  ├─ greeting / carrier glossary ──> template lokal, tanpa LLM
+  └─ analytical question ──> agent ──> query_tool / forecast_tool / decline_tool
+                                  └─> pandas + metric registry + status rules
+                                         └─> answer, chart, table, explainability
 ```
 
-### Keamanan
+- Model memilih tool dan argumen; model tidak menerima baris dataset atau nilai
+  hasil perhitungan.
+- Request menggunakan schema Pydantic dan allow-list metric, dimension, filter,
+  operator, sorting, limit, serta horizon forecast. Tidak ada raw SQL.
+- Semua KPI berasal dari satu registry di `backend/core/metrics.py` dan
+  semantik status berasal dari `backend/core/status_rules.py`.
+- Credentials yang tidak dikonfigurasi menyebabkan protected API fail-closed
+  dengan HTTP 503; credentials salah menghasilkan HTTP 401.
+- HTTP Basic Auth harus digunakan melalui TLS di luar localhost.
+- Langfuse tracing bersifat optional dan fail-open; lihat bagian Observability
+  di [README.md](../README.md).
 
-- **No SQL injection** - Model mengemit structured requests, bukan SQL
-- **Constant-time comparison** - Mencegah timing attacks
-- **Fail-closed** - Jika credentials tidak diset, API return 503
-- **TLS required** - Untuk deployment non-local
+## Dataset bawaan
 
-### Data Source
+File `mock_logistics_data.csv` berisi 400 row, satu row per order, dengan rentang
+`2025-01-01` sampai `2025-12-30`. Kolom yang dibaca aplikasi adalah:
 
-- **File:** `mock_logistics_data.csv` (400 baris)
-- **Periode:** Januari - Desember 2025
-- **Kolom utama:** order_id, order_date, delivery_date, status, carrier, region
+`order_id`, `order_date`, `delivery_date`, `status`, `carrier`, `origin_city`,
+`destination_city`, `region`, `product_category`, dan `quantity`.
 
-### Status Order
+Profil status mentah:
 
-| Status | Jumlah | Keterangan |
-|--------|--------|------------|
-| `delivered` | 304 | Tepat waktu |
-| `delayed` | 55 | Terlambat |
-| `exception` | 11 | Bermasalah |
-| `in_transit` | 27 | Dalam perjalanan |
+| Status | Jumlah | Arti di aplikasi |
+|---|---:|---|
+| `delivered` | 304 | Delivery tepat waktu |
+| `delayed` | 55 | Delivery terlambat |
+| `exception` | 11 | Delivery memiliki exception; dipisahkan dari rate |
+| `in_transit` | 27 | Belum memiliki delivery date |
 | `canceled` | 3 | Dibatalkan |
 
----
+Jangan menyamakan status mentah `delivered` (304) dengan KPI Delivered Orders
+(359); KPI tersebut mencakup `delayed` sesuai status rules.
 
-## Mode Pengembangan
+## Mode frontend
 
-### API Mode (Default)
+Default adalah API mode:
+
 ```bash
 NEXT_PUBLIC_DATA_MODE=api
 ```
-Menggunakan backend API sesungguhnya.
 
-### Fixture Mode
+Untuk pekerjaan frontend tanpa backend atau LLM, gunakan:
+
 ```bash
 NEXT_PUBLIC_DATA_MODE=fixtures
 ```
-Menggunakan data sample tanpa backend. Cocok untuk development frontend.
 
----
+Fixture mode memakai response contoh yang dibundel dan tidak merepresentasikan
+pertanyaan yang sedang diketik. Dalam API mode, jika backend/LLM tidak tersedia,
+Ask Operations menampilkan sample answer berlabel dan notice error agar tidak
+disalahartikan sebagai hasil live.
 
 ## Deployment
 
-### Docker Compose (Local)
-```bash
-docker-compose up --build
-```
+`docker-compose.yml` menjalankan backend di port 8080 dan frontend di port
+3001. Root `Dockerfile` hanya untuk backend; `frontend/Dockerfile` untuk
+frontend. Konfigurasi Railway tersedia di `railway.json` dan
+`frontend/railway.json`; Railway memberi nilai `PORT` saat runtime.
 
-### Railway (Production)
-- Auto-deploy setiap push ke branch `main`
-- Backend dan frontend sebagai 2 service terpisah
-- TLS terminated by Railway
-
----
+Untuk langkah deployment Railway yang lengkap, gunakan bagian Deployment di
+[README.md](../README.md).
 
 ## Troubleshooting
 
-| Masalah | Solusi |
-|---------|--------|
-| API return 503 | Pastikan `APP_USERNAME` dan `APP_PASSWORD` diset di `.env` |
-| Charts tidak muncul | Cek `NEXT_PUBLIC_DATA_MODE` dan koneksi ke backend |
-| AI tidak merespons | Pastikan `OPENROUTER_API_KEY` valid |
-| Data kosong | Cek filter yang aktif, klik Reset untuk clear |
+| Gejala | Pemeriksaan |
+|---|---|
+| API 503 | Pastikan `APP_USERNAME` dan `APP_PASSWORD` terisi di backend dan frontend memakai pasangan yang sama. |
+| API 401 | Periksa `NEXT_PUBLIC_API_USERNAME` dan `NEXT_PUBLIC_API_PASSWORD`. |
+| Chart tidak muncul | Periksa `NEXT_PUBLIC_DATA_MODE`, backend, CORS `FRONTEND_ORIGIN`, dan `NEXT_PUBLIC_API_BASE_URL`. |
+| Ask memakai sample answer | Backend/LLM tidak tersedia; cek `LLM_API_KEY`, `LLM_BASE_URL`, dan `LLM_MODEL`. |
+| Data kosong | Periksa filter aktif atau gunakan Reset. |

@@ -102,6 +102,7 @@ Backend (`.env`):
 | `LANGFUSE_ENABLED` | No | Explicit override: `true` forces tracing on, `false` forces it off regardless of the keys above. |
 | `LANGFUSE_TRACING_ENVIRONMENT` | No | Environment label attached to every trace (e.g. `development`, `staging`, `production`). Defaults to `development`. |
 | `CUSTOM_TAGS` | No | JSON object of extra labels attached to every trace as tags and metadata, e.g. `{"org":"spaceship","project":"dashboard-logistic","developer":"hasnan"}`. Malformed JSON is ignored, not fatal. |
+| `LANGFUSE_INCLUDE_QUERY_SOURCE_ROWS` | No | `true` opts raw filtered shipment rows into Langfuse query observations; defaults to `false`. Aggregated results are always recorded when tracing is enabled. |
 
 The provider is any OpenAI-compatible chat-completions endpoint. `LLM_MODEL`
 must match what that endpoint expects — OpenRouter ids carry a provider prefix
@@ -257,10 +258,11 @@ The app does not:
   all numerical prose from computed results. In `verified` mode, model-written
   prose is used only after every number is matched to tool output; otherwise
   the composed answer wins.
-- **Deterministic presentation.** A time breakdown becomes a line chart, one
+- **Deterministic presentation.** For Ask Operations, a time breakdown becomes a line chart, one
   categorical breakdown becomes a bar chart, and scalar or multi-dimensional
-  output remains a table. The model does not select chart types, and chart data
-  is built from the same rows shown in the table.
+  output remains a table. The model does not select chart types, and Ask chart
+  data is built from the same rows shown in its result table. The dashboard has
+  two fixed charts of its own.
 - **Read-only, fail-closed data handling.** There is no mutation endpoint or
   database write path. Ingestion rejects missing columns, malformed dates,
   reversed delivery dates, duplicate order IDs, and unknown statuses.
@@ -482,7 +484,7 @@ grammar, including:
 - Move compound-result synthesis into a deterministic cross-result composer so
   comparisons remain concise without relying on optional model narration.
 - Add pagination/export, richer multi-dimensional visualizations, accessibility
-  testing, observability, caching, and end-to-end browser tests.
+  testing, alerting/metrics dashboards, caching, and end-to-end browser tests.
 
 ## How the numbers are verified
 
@@ -537,7 +539,7 @@ Pull requests, and pushes to `main`, also run both suites through GitHub Actions
 in `.github/workflows/ci.yml`. The backend job is advisory rather than a merge
 gate: provisioning its environment (deepagents pulls in langchain, anthropic and
 google-genai, so the virtualenv is ~209 MB) costs minutes on a runner, while the
-283 backend tests themselves finish in about five seconds. Run `make test`
+344 backend tests themselves finish in about five seconds. Run `make test`
 before pushing and treat the Actions result as a second opinion, not the check
 you wait on.
 

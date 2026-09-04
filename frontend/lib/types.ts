@@ -156,6 +156,33 @@ export interface AskResult {
   explainability: Explainability;
 }
 
+export interface CarrierKnowledgeItem {
+  name: string;
+  expanded_name: string;
+  description: string;
+  source_url: string;
+}
+
+export interface CarrierKnowledge {
+  items: CarrierKnowledgeItem[];
+}
+
+export type SmalltalkIntent =
+  | "morning"
+  | "noon"
+  | "afternoon"
+  | "evening"
+  | "hello"
+  | "thanks"
+  | "farewell";
+
+export type SmalltalkLanguage = "id" | "en" | "zh";
+
+export interface SmalltalkReply {
+  intent: SmalltalkIntent;
+  language: SmalltalkLanguage;
+}
+
 /** One entry of the agent's own to-do list. */
 export interface PlanStep {
   content: string;
@@ -180,6 +207,10 @@ export interface AskResponse {
   narration: "composed" | "model";
   /** Send this back with the next question to continue the conversation. */
   thread_id: string | null;
+  /** Source-backed glossary payload for carrier information questions. */
+  carrier_knowledge: CarrierKnowledge | null;
+  /** Metadata for a greeting answered from a local template. */
+  smalltalk: SmalltalkReply | null;
   /** True when the agent replied in prose because no tool applied. */
   narrated: boolean;
   chart: ChartSpec | null;

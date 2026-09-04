@@ -20,8 +20,10 @@ tidak pernah nilainya:
 Stored result 1: delay_rate by carrier, 9 group(s).
 ```
 
-Jadi konteks model tidak pernah memuat satu baris dataset pun, dan teks jawaban
-ditulis oleh kode aplikasi. Angka halusinasi tidak punya jalan masuk (PRD 9).
+Jadi konteks model tidak pernah memuat satu baris dataset pun. Dalam mode
+`composed` (default), teks jawaban ditulis oleh kode aplikasi; mode `verified`
+boleh memakai sintesis model hanya setelah semua angka lolos pemeriksaan
+grounding. Angka halusinasi tidak punya jalan masuk (PRD 9).
 
 > **Mencari system prompt?** Ada di [`backend/agents/agent.py`](../backend/agents/agent.py) —
 > `SYSTEM_PROMPT` untuk agent utama dan `_INVESTIGATOR_PROMPT` untuk subagent.
@@ -83,7 +85,7 @@ subagent, dan thread percakapan.
 
 | Komponen | Deskripsi |
 |----------|-----------|
-| `SYSTEM_PROMPT` | Instruksi agent utama — termasuk larangan menyebut angka |
+| `SYSTEM_PROMPT` | Instruksi agent utama — termasuk larangan menyebut angka hasil data |
 | `_INVESTIGATOR_PROMPT` | Instruksi subagent `trend-investigator` |
 | `build_agent(model)` | Merakit graph; dipakai test dengan scripted model |
 | `get_agent()` | Agent process-wide, dibangun sekali dari model terkonfigurasi |
@@ -134,9 +136,10 @@ bebas untuk pesan yang memang tidak butuh tool.
 
 ### 3. Answers (`backend/core/answers.py`)
 
-**Tanggung Jawab:** Menyusun prosa jawaban dan payload explainability dari
-hasil yang sudah dihitung. Ini satu-satunya tempat teks jawaban ditulis.
-Dipisahkan dari orchestrator supaya tool bisa ikut memakainya.
+**Tanggung Jawab:** Menyusun prosa analitik dan payload explainability dari
+hasil yang sudah dihitung. Ini adalah composer default untuk teks jawaban;
+orchestrator dapat memakai prosa model hanya melalui mode `verified` setelah
+grounding. Dipisahkan dari orchestrator supaya tool bisa ikut memakainya.
 
 ### 4. Grounding (`backend/core/grounding.py`)
 
@@ -279,7 +282,9 @@ aturan ini", bukan "biar model yang tentukan" (NFR-03).
 | >1 dimensi (detail rows) | tidak ada chart — chart harus memilih satu dimensi dan membuang sisanya |
 | Forecast | `line`, dengan field `series` memisahkan `actual` dari `forecast` |
 
-Tipe chart yang tersedia: `bar`, `line`, `column`. Tidak ada pie chart.
+Schema chart mengenal tipe `bar`, `line`, dan `column`; selection rules yang
+aktif saat ini hanya menghasilkan `bar` atau `line` (atau `null` tanpa chart).
+Frontend merender hasil non-line sebagai bar chart. Tidak ada pie chart.
 `chart.data` selalu dibangun dari `result.rows` yang sama, jadi chart tidak bisa
 bercerita lain dari tabel di sebelahnya.
 

@@ -40,11 +40,14 @@ cd Logistic-web-dashboard
 cp .env.example .env
 # Edit .env dengan values yang sesuai:
 # - APP_USERNAME / APP_PASSWORD → credentials untuk API
-# - LLM_API_KEY → API key untuk LLM (OpenRouter/OpenAI)
+# - LLM_API_KEY → API key untuk pertanyaan analitik Ask Operations
+# - LLM_BASE_URL / LLM_MODEL → provider dan model OpenAI-compatible
 
 # Setup frontend environment
 cp frontend/.env.example frontend/.env.local
-# Pastikan NEXT_PUBLIC_API_USERNAME/PASSWORD sinkron dengan APP_USERNAME/PASSWORD
+# Pastikan NEXT_PUBLIC_API_BASE_URL mengarah ke backend dan
+# NEXT_PUBLIC_API_USERNAME/PASSWORD sinkron dengan APP_USERNAME/PASSWORD.
+# Gunakan NEXT_PUBLIC_DATA_MODE=fixtures untuk pekerjaan frontend tanpa backend.
 ```
 
 ### Step 2: Backend Setup
@@ -133,7 +136,7 @@ make setup        # Install semua dependencies (uv sync + npm install)
 make dev          # Run backend + frontend secara parallel
 make backend      # Run backend only
 make frontend     # Run frontend only
-make test         # Run backend tests
+make test         # Run backend dan frontend tests
 make test-cov     # Run tests dengan coverage report
 make lint         # Run frontend linter
 make docker-build # Build Docker image
@@ -334,6 +337,13 @@ def test_new_feature():
 4. **CORS Configuration:**
    - Set `FRONTEND_ORIGIN` di backend service
 
+5. **API URL frontend:**
+   - Set `NEXT_PUBLIC_API_BASE_URL` di frontend service ke URL publik backend.
+
+Daftar environment variable lengkap ada di [README.md](../README.md). Nilai
+`NEXT_PUBLIC_*` adalah build-time configuration dan tertanam ke bundle browser;
+jangan masukkan secret produksi ke sana.
+
 ### Manual Deployment
 
 ```bash
@@ -358,8 +368,8 @@ docker compose up -d
 # Cek dependencies
 uv sync
 
-# Cek environment variables
-cat .env
+# Cek file environment tersedia tanpa mencetak secret
+test -f .env && echo ".env exists"
 
 # Cek port
 lsof -i :8080
@@ -371,8 +381,8 @@ lsof -i :8080
 # Cek dependencies
 cd frontend && npm install
 
-# Cek environment variables
-cat frontend/.env.local
+# Cek file environment tersedia tanpa mencetak secret
+test -f frontend/.env.local && echo "frontend/.env.local exists"
 
 # Cek port
 lsof -i :3001
@@ -381,12 +391,9 @@ lsof -i :3001
 ### LLM tidak merespons
 
 ```bash
-# Cek API key
-echo $LLM_API_KEY
-
-# Test API
-curl -H "Authorization: Bearer $LLM_API_KEY" \
-     https://openrouter.ai/api/v1/models
+# Pastikan .env berisi LLM_API_KEY yang valid untuk provider yang dipilih.
+# Backend memuat nilai dari .env; jangan mencetak API key ke terminal atau log.
+# LLM_BASE_URL harus berupa API root, misalnya https://openrouter.ai/api/v1.
 ```
 
 ### Tests gagal
@@ -412,7 +419,7 @@ uv run pytest --cov=backend --cov-report=term-missing
 ├─────────────────────────────────────────────────────────────┤
 │  make setup        → Install semua dependencies             │
 │  make dev          → Run backend + frontend                 │
-│  make test         → Run tests                              │
+│  make test         → Backend + frontend tests               │
 │  make lint         → Run linter                             │
 │  make clean        → Hapus build artifacts                  │
 ├─────────────────────────────────────────────────────────────┤

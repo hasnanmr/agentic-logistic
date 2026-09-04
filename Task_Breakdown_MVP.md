@@ -7,7 +7,7 @@
 | Source PRD | v2.0 |
 | Effort (sum of all tasks) | **~13h35m** — above the source spec's 6–10h guidance. Parallelizing cuts wall-clock, not effort; see "If short on time". |
 | Wall-clock if parallelized | **~6h** with 3–4 workers (Wave 0 45m → longest Wave 1 stream, C at 3h15m → Wave 2 1h15m → Wave 3 45m) |
-| Status | Wave 0 + Streams A/B1/B2/D/E/G + Wave 2 (incl. I.6) complete — contracts, fixtures, routers, backend tests, frontend dashboard + Ask Operations (ports: FE 3001, BE 8080), and reconciliation tests all landed. Backend code is now grouped under `backend/api`, `backend/agents`, `backend/tools`, `backend/observe`, and `backend/core`. Ask Operations supports follow-up questions: stateless 10-turn conversation history replayed by the client per request (`AskRequest.history`), chat UI on /ask, bounded in `test_ask_turns.py`. Langfuse tracing is wired into `backend/agents/agent.py`, fail-open, tested in `test_observability.py` |
+| Status | Wave 0 + Streams A/B1/B2/D/E/G + Wave 2 (incl. I.6) complete — contracts, fixtures, routers, backend tests, frontend dashboard + Ask Operations (ports: FE 3001, BE 8080), reconciliation tests, and fail-open Langfuse tracing all landed. Backend code is grouped under `backend/api`, `backend/agents`, `backend/tools`, `backend/observe`, and `backend/core`. Ask Operations supports server-held follow-up threads via `thread_id`, with a stateless `history` fallback capped at 10 turns; the UI limit is also 10 turns. Current backend collection: 344 tests. |
 | Dataset | `mock_logistics_data.csv` (400 rows, 2025-01-01 to 2025-12-30, 1 row = 1 order) |
 | Ground-truth KPI values | Total Orders 400 · Delivered Orders 359 · Delayed Orders 55 · On-Time Rate 84.68% · Delay Rate 15.32% · Avg Delivery Time 3.83 days |
 
@@ -45,7 +45,7 @@ WAVE 0 (serial, blocking, ~45m)
 - [x] **W0.1** (10 min) Repo skeleton: `backend/` (FastAPI) + `frontend/` (React/Next). One `backend/main.py` imports and registers routers from `backend/api/` — `auth.py`, `query.py`, `ask.py`, and `forecast.py`.
 - [x] **W0.2** (20 min) Write `backend/core/schemas.py` with the five contracts below, as Pydantic models. This file is frozen after Wave 0.
 - [x] **W0.3** (10 min) Write `backend/core/fixtures.py`: one hardcoded sample of each contract's response shape (a fake carrier delay-rate result, a fake forecast result, a fake explainability payload). Streams C and E build against these until Wave 2.
-- [x] **W0.4** (5 min) `.env.example` with `APP_USERNAME`, `APP_PASSWORD`, `SESSION_SECRET`, `LLM_API_KEY`, `DATA_CSV_PATH`. Commit no real values.
+- [x] **W0.4** (5 min) `.env.example` with the current auth, LLM, dataset, CORS, narration, and optional Langfuse variables. Commit no credentials.
 
 ### The five frozen contracts
 
@@ -171,7 +171,7 @@ For `operation: "forecast"` answers, `query_plan` is not enough to make the resu
 ### Stream A — Auth: HTTP Basic (~10 min, no dependencies)
 
 - [x] **A.1** (7 min) `backend/api/auth.py` (currently a stub): `fastapi.security.HTTPBasic` dependency reading `APP_USERNAME`/`APP_PASSWORD` from env, compared with `secrets.compare_digest` (not `==`). Apply it to every protected router. No login page, no cookie, no user table, no session store.
-- [x] **A.2** (3 min) Remove the now-unused `SESSION_SECRET` line from `.env.example` (Wave 0 wrote it for the cookie design that this replaces), and drop the test credential into `README_NOTES.md` for Stream F to merge in Wave 3.
+- [x] **A.2** (3 min) Remove the unused `SESSION_SECRET` line from `.env.example`; Basic Auth uses only `APP_USERNAME` and `APP_PASSWORD`, and credential values remain outside the repository.
 
 **Done when:** protected routes return 401 without credentials and pass with them. *(FR-16)*
 
@@ -184,7 +184,7 @@ For `operation: "forecast"` answers, `query_plan` is not enough to make the resu
 - [x] **B1.1** (10 min) Add `pandas` to `pyproject.toml`, then `backend/core/ingestion.py`: `pd.read_csv` with explicit `parse_dates=['order_date','delivery_date']`. Load once at import; never mutate the DataFrame — that is the whole of NFR-02, no read-only mode to configure. **No DuckDB**: 400 rows is not an analytical-database workload.
 - [x] **B1.2** (10 min) Column validation: fail loudly with a clear message if any required column is missing. Defensive duplicate-`order_id` check.
 - [x] **B1.3** (10 min) `backend/core/status_rules.py`: encode status semantics **once** — `delivered`+`delayed` = Delivered Orders; `exception` separate; `in_transit`/`canceled` excluded. Every metric reads from here.
-- [x] **B1.4** (25 min) `backend/core/metrics.py`: the seven metrics per PRD §8 as a registry — `{metric_name: {sql_fragment, definition_text, allowed_dimensions}}`. The `definition_text` field is what Stream E's explainability payload reads.
+- [x] **B1.4** (25 min) `backend/core/metrics.py`: the seven metrics per PRD §8 as a registry — `{metric_name: {compute, definition_text, inclusion_rule, basis_count, allowed_dimensions}}`. Explainability reads the definition and population from this registry.
 
 **Done when:** metrics with no filters reproduce the ground-truth values exactly (400 / 359 / 55 / 84.68% / 15.32% / 3.83).
 
@@ -263,7 +263,7 @@ Required downstream behavior:
 
 *Builds against the metric-registry interface from Wave 0, using a 2-metric stub registry until B1 lands. Integrates in Wave 2.*
 
-- [x] **B2.1** (20 min) `backend/tools/query.py`: compile a StructuredRequest into pandas operations — boolean-mask filters, then `groupby(dimensions).agg(...)`. With no SQL anywhere there is no injection surface to defend, which is the point.
+- [x] **B2.1** (20 min) `backend/tools/query.py`: compile a StructuredRequest into pandas operations — boolean-mask filters, then complete `groupby` iteration so each metric receives every source column it may need. With no SQL anywhere there is no injection surface to defend, which is the point.
 - [x] **B2.2** (20 min) Validation layer: `operation` is one of `query`/`forecast`, metric exists, dimensions allowed for that metric, filter fields/operators allow-listed, limit bounded, and for forecasts `horizon_weeks` is an integer in **1–8** (reject out-of-range, don't clamp) with `grain == "week"`. Reject before computation with a clear error. *(FR-12)*
 - [x] **B2.3** (10 min) Time-preset resolver: `previous_month`, `previous_week`, `last_N_weeks`, `last_N_months`, explicit range → concrete start/end dates.
 - [x] **B2.4** (5 min) `backend/api/query.py`: expose `POST /api/query` returning a QueryResult.
@@ -276,10 +276,10 @@ Required downstream behavior:
 
 - [x] **C.1** (20 min) App shell, routing, layout, chart library wired up.
 - [x] **C.2** (20 min) API client module — the single place that calls the backend. Points at fixtures now, flip one flag in Wave 2.
-- [x] **C.3** (30 min) Five KPI cards. The Average Delivery Time card shows its basis inline (e.g. "3.83 days · n=370, incl. exception") since its denominator deliberately differs from Delivered Orders (359) — PRD §8. *(FR-01–FR-04)*
+- [x] **C.3** (30 min) Six KPI cards. The Average Delivery Time card shows its basis inline (e.g. "3.83 days · n=370, incl. exception") since its denominator deliberately differs from Delivered Orders (359) — PRD §8. *(FR-01–FR-04)*
 - [x] **C.4** (30 min) Chart 1 — order volume over time (weekly).
 - [x] **C.5** (30 min) Chart 2 — on-time vs. delayed by carrier.
-- [x] **C.6** (20 min) Filter bar: date range minimum, carrier if time allows. Filters re-call the same query endpoint. *(NFR-01)*
+- [x] **C.6** (20 min) Filter bar: date presets/custom dates, carrier, and region. Filters re-call the same query endpoint. *(NFR-01)*
 - [x] **C.7** (20 min) Data table for the active selection, plus the **empty-result state** — a valid query returning 0 rows (easy to hit once the date filter narrows) must render "no orders match these filters" with the active filters echoed, never a blank panel or a zeroed-out chart that reads as real data. Same state is reused on the Ask Operations page. *(NFR-04 — this was the one failure state with no owner; invalid CSV is B1.2, unsupported query is E.3, forecast insufficiency is D.5.)*
 - [x] **C.8** (25 min) Ask Operations page: input box, answer display, chart slot, table slot, explainability panel (collapsible). Renders from the AskResponse fixture. The panel must handle both shapes — query answers (metric, plan, filters, `metric_basis`) and forecast answers (horizon, method, history window, baseline vs. forecast level, recommendation rule), including the `time_range.means` label so a history window is never displayed as if it were a reported period.
 
@@ -342,7 +342,7 @@ Required downstream behavior:
 
 - [ ] **F.1** (20 min) Host setup (Vercel/Railway/Render/Fly), env var plumbing, deploy the Wave 0 skeleton as a smoke test.
 - [ ] **F.2** (10 min) Confirm `.gitignore` covers `.env`; no secrets in the repo.
-- [ ] **F.3** (15 min) `README.md` skeleton with the section headings the spec requires: setup + env vars, system overview + design decisions + data flow, question interpretation & tool selection, assumptions/limitations, future improvements, AI-usage disclosure.
+- [x] **F.3** (15 min) `README.md` with setup + env vars, system overview + design decisions + data flow, question interpretation & tool selection, assumptions/limitations, future improvements, and AI-usage disclosure.
 
 **Done when:** an empty-but-real app is live at a public URL and redeploys on push.
 
@@ -364,8 +364,8 @@ Required downstream behavior:
 ## WAVE 3 — Finalize (~45 min)
 
 - [ ] **Z.1** (15 min) Deploy the integrated app; verify the public URL end to end with the auth credential.
-- [ ] **Z.2** (25 min) Finish `README.md`: merge Stream A's credential note; write up design decisions and data flow; explicitly document the tradeoffs — `status='exception'` excluded from on-time/delay rates **but included in Average Delivery Time (n=370 vs 359), with the rationale** (PRD §8); single forecasting method with the fixed ±10% / trailing-4-week rule and the 8-week insufficient-history threshold; login-only minimal auth; stateless Ask Operations.
-- [ ] **Z.3** (5 min) AI-usage disclosure section, per the spec's note.
+- [x] **Z.2** (25 min) Finish `README.md`: document environment variables, design decisions/data flow, the `exception` denominator tradeoff (`n=370` vs `n=359`), the single forecasting method and thresholds, minimal Basic Auth, and server-side Ask Operations threads with stateless history fallback.
+- [x] **Z.3** (5 min) AI-usage disclosure section, per the spec's note.
 
 ---
 

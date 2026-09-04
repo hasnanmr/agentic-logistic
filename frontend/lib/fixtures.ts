@@ -120,6 +120,8 @@ export const ASK_RESPONSE_FIXTURE: AskResponse = {
   plan: [],
   narration: "composed",
   thread_id: "ask-fixture",
+  carrier_knowledge: null,
+  smalltalk: null,
   narrated: false,
   chart: CARRIER_ASK_RESULT.chart,
   table: CARRIER_ASK_RESULT.table,
