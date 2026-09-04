@@ -323,12 +323,15 @@ view — changes based on whether tracing is on.
 3. Ask a question through `/api/ask` and check the Langfuse project's Traces
    view for `ask-operations-request`.
 
-Each `query_tool` observation records the structured request as its input and
+Alongside each LangChain `query_tool` observation sits a
+`query_tool.computation` span recording the structured request as its input and
 the computed `QueryResult` (columns, rows, population, and truncation state) as
 its output. This lets reviewers compare the agent's requested query with the
-ground truth used to build the dashboard answer. Raw filtered shipment rows are
-not exported by default; set `LANGFUSE_INCLUDE_QUERY_SOURCE_ROWS=true` only
-when that data is safe to send to Langfuse.
+ground truth used to build the dashboard answer — the `query_tool` observation
+itself carries only the call arguments and the deliberately figure-free receipt
+the agent gets back. Raw filtered shipment rows are not exported by default; set
+`LANGFUSE_INCLUDE_QUERY_SOURCE_ROWS=true` only when that data is safe to send to
+Langfuse. `forecast_tool` has no equivalent span yet.
 
 Optionally set `CUSTOM_TAGS` to a JSON object to stamp every trace with extra
 labels (team, project, owner, ...), e.g.:
@@ -336,7 +339,9 @@ labels (team, project, owner, ...), e.g.:
 CUSTOM_TAGS={"org":"spaceship","project":"dashboard-logistic","developer":"hasnan"}
 ```
 Each key becomes both a `key:value` tag (filterable in the Traces list) and a
-metadata field on the trace.
+metadata field. Under the SDK v4 data model these correlating attributes —
+session, tags, metadata — are propagated onto every observation in the trace,
+not just the root, so they can be filtered on without a join.
 
 **Production:** set the same three variables through the deployment
 platform's secret store, never in a committed file — `.env.example` documents

@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Iterator
 
@@ -107,34 +107,69 @@ def redact(metadata: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def annotate_current_observation(
+def record_tool_computation(
     *,
+    name: str,
     input: Any | None = None,
     output: Any | None = None,
     metadata: dict[str, Any] | None = None,
     level: str | None = None,
 ) -> None:
-    """Attach computed tool input/output to the active Langfuse observation.
+    """Record what a tool actually computed, as its own Langfuse observation.
 
-    LangChain creates the ``query_tool`` observation before entering the tool
-    function. Updating the current span enriches that existing observation
-    instead of creating a second, detached span. This is best effort for the
-    same reason as the rest of this adapter: observability must never change
-    the answer path.
+    This used to call ``update_current_span``, on the assumption that it would
+    enrich the ``query_tool`` observation LangChain's callback handler opens
+    just before the tool function runs. It does not, and the data was
+    invisible in Langfuse as a result. Two facts have to line up and do not:
+
+    * ``update_current_span`` resolves "current" from the **OTel context**.
+    * The Langfuse LangChain handler builds its tool observation with
+      ``start_observation`` and files it in a run-id map. A callback cannot
+      wrap the execution it reports on, so that observation is never entered
+      into the OTel context.
+
+    So the current span inside a tool body is still the root request span from
+    :func:`traced_ask_request`, and every call landed there - overwriting the
+    root's own input and output, and overwriting itself again on a second tool
+    call, while the ``query_tool`` observation kept nothing but LangChain's
+    default argument string and our figure-free receipt.
+
+    Reaching the handler's observation would mean depending on private
+    internals (``_observations``, keyed by a run id the tool has no access
+    to), so this opens an observation of its own instead. It is a sibling of
+    LangChain's ``query_tool`` span rather than a child - the one cost of
+    doing this through public API - so the name should say which tool call it
+    belongs to.
+
+    Best effort, like the rest of this adapter: observability must never
+    change the answer path.
     """
 
     client = _client_or_none()
     if client is None:
         return
     try:
-        client.update_current_span(
+        observation = client.start_observation(
+            name=name,
+            as_type="span",
             input=redact(input) if isinstance(input, dict) else input,
+        )
+    except Exception:
+        logger.debug("Could not open a Langfuse tool observation.", exc_info=True)
+        return
+    try:
+        observation.update(
             output=redact(output) if isinstance(output, dict) else output,
             metadata=redact(metadata) if metadata else None,
             level=level,
         )
     except Exception:
-        logger.debug("Could not annotate current Langfuse observation.", exc_info=True)
+        logger.debug("Could not annotate the Langfuse tool observation.", exc_info=True)
+    finally:
+        try:
+            observation.end()
+        except Exception:
+            logger.debug("Could not end the Langfuse tool observation.", exc_info=True)
 
 
 _client: Any = None
@@ -187,6 +222,10 @@ class RequestTrace:
     enabled: bool
     trace_id: str | None = None
     callbacks: list[Any] = field(default_factory=list)
+    #: The run's root observation. Held because SDK v4 has no trace object to
+    #: update: in its observations-first data model the trace's output *is*
+    #: the root observation's output.
+    root: Any | None = None
 
     def run_config_metadata(
         self, *, thread_id: str | None, model: str | None
@@ -218,19 +257,25 @@ class RequestTrace:
     ) -> None:
         """Attach a non-fatal outcome (decline reason, tool-error count, ...).
 
-        Best-effort: called while the root span is still open, so a broken
-        Langfuse call here must not interrupt the response either.
+        Writes to the root observation. SDK v4 removed ``update_current_trace``
+        and offers ``set_current_trace_io`` in its place, but that is deprecated
+        on arrival - kept only for trace-level LLM-as-a-judge evaluators - and
+        the documented path for new code is to set input and output on the root
+        observation itself, which is what a v4 trace reads them from anyway.
+
+        Best-effort: called while the root observation is still open, so a
+        broken Langfuse call here must not interrupt the response either.
         """
 
-        if not self.enabled or _client is None:
+        if not self.enabled or self.root is None:
             return
         try:
-            _client.update_current_trace(
+            self.root.update(
                 output=output,
                 metadata=redact(metadata) if metadata else None,
             )
         except Exception:
-            logger.debug("Could not annotate Langfuse trace.", exc_info=True)
+            logger.debug("Could not annotate the Langfuse root span.", exc_info=True)
 
 
 _DISABLED = RequestTrace(enabled=False)
@@ -270,36 +315,50 @@ def traced_ask_request(
         yield _DISABLED
         return
 
+    # One stack for the root observation and the attribute scope, so both are
+    # unwound in the right order however the request ends.
+    stack = ExitStack()
     try:
-        span_cm = client.start_as_current_span(
-            name="ask-operations-request",
-            input=redact({"question": question}),
+        root = stack.enter_context(
+            client.start_as_current_observation(
+                name="ask-operations-request",
+                as_type="span",
+                input=redact({"question": question}),
+            )
         )
-        span_cm.__enter__()
     except Exception:
         logger.warning(
             "Could not start a Langfuse span; continuing without tracing.",
             exc_info=True,
         )
+        stack.close()
         yield _DISABLED
         return
 
+    # Session, tags and metadata are propagated rather than written onto a
+    # trace: SDK v4's data model puts correlating attributes on every
+    # observation, so they are set by a context manager covering the run and
+    # inherited by every child observation the callback handler opens.
     try:
+        from langfuse import propagate_attributes
+
         tags = custom_tags()
-        client.update_current_trace(
-            session_id=thread_id,
-            tags=[
-                "ask-operations",
-                deployment_environment(),
-                *(f"{key}:{value}" for key, value in tags.items()),
-            ],
-            metadata=redact(
-                {
-                    **tags,
-                    "deployment_environment": deployment_environment(),
-                    "model": model,
-                }
-            ),
+        stack.enter_context(
+            propagate_attributes(
+                session_id=thread_id,
+                tags=[
+                    "ask-operations",
+                    deployment_environment(),
+                    *(f"{key}:{value}" for key, value in tags.items()),
+                ],
+                metadata=redact(
+                    {
+                        **tags,
+                        "deployment_environment": deployment_environment(),
+                        "model": model,
+                    }
+                ),
+            )
         )
     except Exception:
         logger.debug("Could not set Langfuse trace attributes.", exc_info=True)
@@ -311,16 +370,18 @@ def traced_ask_request(
         logger.debug("Could not read the Langfuse trace id.", exc_info=True)
 
     try:
-        yield RequestTrace(enabled=True, trace_id=trace_id, callbacks=[handler])
+        yield RequestTrace(
+            enabled=True, trace_id=trace_id, callbacks=[handler], root=root
+        )
     except BaseException as exc:
         try:
-            span_cm.__exit__(type(exc), exc, exc.__traceback__)
+            stack.__exit__(type(exc), exc, exc.__traceback__)
         except Exception:
             logger.debug("Could not close the Langfuse span.", exc_info=True)
         raise
     else:
         try:
-            span_cm.__exit__(None, None, None)
+            stack.__exit__(None, None, None)
         except Exception:
             logger.debug("Could not close the Langfuse span.", exc_info=True)
     finally:

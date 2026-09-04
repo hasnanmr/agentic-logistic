@@ -292,12 +292,12 @@ def query_tool(runtime: ToolRuntime, **arguments: Any) -> str:
         # is also kept for the refusal the user sees if it cannot.
         raise QueryToolError(reason) from error
 
-    # The callback handler already creates the query_tool observation, but the
-    # default LangChain tool output is only the receipt below. Record the
-    # governed request and the computed result on that same observation so a
-    # reviewer can compare the model's call with the ground truth shown to the
-    # user. Raw source rows are opt-in because they may contain sensitive
-    # shipment data; the aggregate result is always recorded.
+    # LangChain's own query_tool observation carries only the arguments in and
+    # the receipt below out - and the receipt withholds every figure on
+    # purpose. Record the governed request and the computed result alongside
+    # it so a reviewer can compare the model's call with the ground truth the
+    # user was shown. Raw source rows are opt-in because they may contain
+    # sensitive shipment data; the aggregate result is always recorded.
     observation_input: dict[str, Any] = {
         "request": request.model_dump(mode="json"),
         "population": {
@@ -307,7 +307,8 @@ def query_tool(runtime: ToolRuntime, **arguments: Any) -> str:
     }
     if observability.include_query_source_rows():
         observation_input["population"]["rows"] = _json_rows(resolved.frame)
-    observability.annotate_current_observation(
+    observability.record_tool_computation(
+        name=f"{QUERY_TOOL}.computation",
         input=observation_input,
         output=result.model_dump(mode="json"),
         metadata={

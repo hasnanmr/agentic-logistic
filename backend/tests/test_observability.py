@@ -10,6 +10,7 @@ offline and deterministically.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import Any
 
 import pandas as pd
@@ -70,11 +71,34 @@ def _reset_observability_state(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class FakeSpan:
+    """The root observation, which is also a context manager in v4."""
+
+    def __init__(self) -> None:
+        self.updates: list[dict[str, Any]] = []
+
     def __enter__(self) -> "FakeSpan":
         return self
 
     def __exit__(self, *exc_info: Any) -> bool:
         return False
+
+    def update(self, **kwargs: Any) -> None:
+        self.updates.append(kwargs)
+
+
+class RecordingPropagation:
+    """Stands in for ``langfuse.propagate_attributes``, recording its scope.
+
+    v4 has no trace object to update: session, tags and metadata are
+    propagated to every observation by a context manager instead.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def __call__(self, **kwargs: Any) -> Any:
+        self.calls.append(kwargs)
+        return nullcontext()
 
 
 class RaisingSpanContext:
@@ -87,25 +111,47 @@ class RaisingSpanContext:
         return False
 
 
+class FakeObservation:
+    """What ``client.start_observation`` hands back, recording its own calls."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        self.start_kwargs = kwargs
+        self.updates: list[dict[str, Any]] = []
+        self.ended = False
+
+    def update(self, **kwargs: Any) -> None:
+        self.updates.append(kwargs)
+
+    def end(self) -> None:
+        self.ended = True
+
+
 class FakeLangfuseClient:
     """Records every call so tests can assert without a real Langfuse server."""
 
     def __init__(self, **kwargs: Any) -> None:
         self.init_kwargs = kwargs
-        self.trace_updates: list[dict[str, Any]] = []
-        self.observation_updates: list[dict[str, Any]] = []
+        self.root_span: FakeSpan | None = None
+        #: Kept so a test can prove this is *not* how tool data is recorded:
+        #: it writes to whatever span the OTel context holds, which inside a
+        #: tool body is the root request span, not the tool's observation.
+        self.current_span_updates: list[dict[str, Any]] = []
+        self.observations: list[FakeObservation] = []
         self.flush_calls = 0
         self.span_started = False
 
-    def start_as_current_span(self, **kwargs: Any) -> FakeSpan:
+    def start_as_current_observation(self, **kwargs: Any) -> FakeSpan:
         self.span_started = True
-        return FakeSpan()
+        self.root_span = FakeSpan()
+        return self.root_span
 
-    def update_current_trace(self, **kwargs: Any) -> None:
-        self.trace_updates.append(kwargs)
+    def start_observation(self, **kwargs: Any) -> FakeObservation:
+        observation = FakeObservation(**kwargs)
+        self.observations.append(observation)
+        return observation
 
     def update_current_span(self, **kwargs: Any) -> None:
-        self.observation_updates.append(kwargs)
+        self.current_span_updates.append(kwargs)
 
     def get_current_trace_id(self) -> str:
         return "trace-fake-123"
@@ -243,7 +289,7 @@ def test_a_broken_span_start_falls_back_to_disabled(
 ) -> None:
     _enable(monkeypatch)
     fake = FakeLangfuseClient()
-    fake.start_as_current_span = lambda **kwargs: RaisingSpanContext()  # type: ignore[method-assign]
+    fake.start_as_current_observation = lambda **kwargs: RaisingSpanContext()  # type: ignore[method-assign]
     monkeypatch.setattr("langfuse.Langfuse", lambda **kwargs: fake)
 
     with observability.traced_ask_request(question="q", thread_id="t1") as trace:
@@ -304,7 +350,9 @@ def test_enabled_trace_carries_session_and_environment(
     _enable(monkeypatch)
     monkeypatch.setenv("LANGFUSE_TRACING_ENVIRONMENT", "staging")
     fake = FakeLangfuseClient()
+    propagation = RecordingPropagation()
     monkeypatch.setattr("langfuse.Langfuse", lambda **kwargs: fake)
+    monkeypatch.setattr("langfuse.propagate_attributes", propagation)
     monkeypatch.setattr(
         "langfuse.langchain.CallbackHandler", lambda **kwargs: RecordingCallbackHandler()
     )
@@ -321,12 +369,13 @@ def test_enabled_trace_carries_session_and_environment(
 
     assert fake.span_started is True
     assert fake.flush_calls == 1
-    [update] = fake.trace_updates
-    assert update["session_id"] == "thread-9"
-    assert update["metadata"]["deployment_environment"] == "staging"
+    [scope] = propagation.calls
+    assert scope["session_id"] == "thread-9"
+    assert scope["metadata"]["deployment_environment"] == "staging"
+    assert "staging" in scope["tags"]
 
 
-def test_custom_tags_reach_both_the_trace_update_and_run_config(
+def test_custom_tags_reach_both_the_propagated_attributes_and_run_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _enable(monkeypatch)
@@ -335,7 +384,9 @@ def test_custom_tags_reach_both_the_trace_update_and_run_config(
         '{"org":"spaceship","project":"dashboard-logistic","developer":"hasnan"}',
     )
     fake = FakeLangfuseClient()
+    propagation = RecordingPropagation()
     monkeypatch.setattr("langfuse.Langfuse", lambda **kwargs: fake)
+    monkeypatch.setattr("langfuse.propagate_attributes", propagation)
     monkeypatch.setattr(
         "langfuse.langchain.CallbackHandler", lambda **kwargs: RecordingCallbackHandler()
     )
@@ -350,10 +401,33 @@ def test_custom_tags_reach_both_the_trace_update_and_run_config(
     assert "developer:hasnan" in metadata["langfuse_tags"]
     assert metadata["langfuse_metadata"]["org"] == "spaceship"
 
-    [update] = fake.trace_updates
-    assert "org:spaceship" in update["tags"]
-    assert update["metadata"]["project"] == "dashboard-logistic"
-    assert update["metadata"]["developer"] == "hasnan"
+    [scope] = propagation.calls
+    assert "org:spaceship" in scope["tags"]
+    assert scope["metadata"]["project"] == "dashboard-logistic"
+    assert scope["metadata"]["developer"] == "hasnan"
+
+
+def test_annotate_writes_the_outcome_onto_the_root_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """v4 removed ``update_current_trace``. In its observations-first model the
+    trace's output is the root observation's output, so that is where a run's
+    outcome goes - not through the deprecated ``set_current_trace_io``."""
+
+    _enable(monkeypatch)
+    fake = FakeLangfuseClient()
+    monkeypatch.setattr("langfuse.Langfuse", lambda **kwargs: fake)
+    monkeypatch.setattr(
+        "langfuse.langchain.CallbackHandler", lambda **kwargs: RecordingCallbackHandler()
+    )
+
+    with observability.traced_ask_request(question="q", thread_id="t1") as trace:
+        trace.annotate(output={"results_recorded": 2}, metadata={"api_key": "secret"})
+
+    assert fake.root_span is not None
+    [update] = fake.root_span.updates
+    assert update["output"] == {"results_recorded": 2}
+    assert update["metadata"]["api_key"] == "<redacted>"
 
 
 def test_annotate_is_a_noop_when_tracing_is_disabled(
@@ -364,10 +438,10 @@ def test_annotate_is_a_noop_when_tracing_is_disabled(
 
     with observability.traced_ask_request(question="q", thread_id="t1") as trace:
         trace.annotate(output={"x": 1})  # must not raise
-    observability.annotate_current_observation(output={"x": 1})
+    observability.record_tool_computation(name="query_tool.computation", output={"x": 1})
 
 
-def test_query_result_is_attached_to_the_current_observation(
+def test_a_tool_computation_gets_its_own_observation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _enable(monkeypatch)
@@ -375,14 +449,41 @@ def test_query_result_is_attached_to_the_current_observation(
     monkeypatch.setattr("langfuse.Langfuse", lambda **kwargs: fake)
 
     with observability.traced_ask_request(question="q", thread_id="t1"):
-        observability.annotate_current_observation(
+        observability.record_tool_computation(
+            name="query_tool.computation",
             input={"request": {"metric": "delay_rate"}},
             output={"columns": ["carrier", "delay_rate"], "rows": [["DHL", 25.0]]},
         )
 
-    [update] = fake.observation_updates
-    assert update["input"]["request"]["metric"] == "delay_rate"
+    [observation] = fake.observations
+    assert observation.start_kwargs["name"] == "query_tool.computation"
+    assert observation.start_kwargs["input"]["request"]["metric"] == "delay_rate"
+    [update] = observation.updates
     assert update["output"]["rows"] == [["DHL", 25.0]]
+    assert observation.ended is True
+
+
+def test_a_tool_computation_never_writes_to_the_current_span(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The bug this replaced: ``update_current_span`` resolves the current span
+    from the OTel context, and the Langfuse LangChain handler never puts its
+    tool observation there. Inside a tool body the current span is still the
+    root request span, so every call overwrote the root's own input and output
+    - and overwrote itself again on a second tool call - while the query_tool
+    observation showed nothing but the arguments and our figure-free receipt.
+    """
+
+    _enable(monkeypatch)
+    fake = FakeLangfuseClient()
+    monkeypatch.setattr("langfuse.Langfuse", lambda **kwargs: fake)
+
+    with observability.traced_ask_request(question="q", thread_id="t1"):
+        observability.record_tool_computation(
+            name="query_tool.computation", output={"rows": [["DHL", 25.0]]}
+        )
+
+    assert fake.current_span_updates == []
 
 
 # --- end to end: one real agent run produces model + tool observations ------
@@ -412,11 +513,13 @@ def test_a_real_agent_run_drives_model_and_tool_observations(
     assert QUERY_TOOL in recorder.tool_starts
     assert fake_client.span_started is True
     assert fake_client.flush_calls == 1
-    assert fake_client.observation_updates
-    query_update = fake_client.observation_updates[-1]
-    assert query_update["input"]["request"]["metric"] == "delay_rate"
-    assert query_update["output"]["columns"] == ["carrier", "delay_rate"]
-    assert query_update["output"]["rows"]
+    assert fake_client.observations
+    computation = fake_client.observations[-1]
+    assert computation.start_kwargs["name"] == f"{QUERY_TOOL}.computation"
+    assert computation.start_kwargs["input"]["request"]["metric"] == "delay_rate"
+    [update] = computation.updates
+    assert update["output"]["columns"] == ["carrier", "delay_rate"]
+    assert update["output"]["rows"]
 
 
 def test_tracing_disabled_leaves_the_agent_run_unaffected(
