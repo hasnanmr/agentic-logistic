@@ -151,3 +151,76 @@ def test_the_prompt_carries_the_registry_denominator() -> None:
     from backend.core.answers import METRIC_DEFINITIONS
 
     assert "delay_rate = delayed orders / delivered orders x 100" in METRIC_DEFINITIONS
+
+
+# --- a definition question that turns on a real count -----------------------
+#
+# "Kenapa bukan 400? semua data kan 400" asks why delay_rate's denominator is
+# not the whole dataset. Answering it needs two counts, so prose alone cannot
+# carry it: 400 stated with nothing computed is an unverified figure and the
+# reply is discarded. The agent has to compute the counts it compares.
+
+
+def _counts_then_explains() -> list:
+    from backend.tests.scripted_model import ToolCall, asks_for, says
+    from backend.tools.agent import QUERY_TOOL
+
+    return [
+        asks_for(
+            ToolCall(QUERY_TOOL, {"metric": "total_orders", "language": "id"}),
+            ToolCall(QUERY_TOOL, {"metric": "delivered_orders", "language": "id"}),
+        ),
+        says(
+            "Penyebut delay rate adalah pesanan yang sudah terkirim, bukan seluruh "
+            "pesanan, sehingga angkanya bukan 400 melainkan 359."
+        ),
+    ]
+
+
+DENOMINATOR_QUESTION = "kenapa bukan 400? semua data kan 400"
+
+
+def test_computing_the_counts_answers_the_denominator_question(
+    dataset: pd.DataFrame,
+) -> None:
+    from backend.agents.agent import build_agent
+    from backend.agents.orchestrator import answer_question
+    from backend.tests.scripted_model import ScriptedChatModel
+
+    response = answer_question(
+        DENOMINATOR_QUESTION,
+        build_agent(ScriptedChatModel(script=_counts_then_explains())),
+        dataset,
+    )
+
+    assert response.unsupported is False
+    assert len(response.results) == 2
+    assert "400" in response.answer and "359" in response.answer
+    # With both counts computed, the agent's own explanation is grounded too,
+    # so `verified` narration mode may print it verbatim.
+    assert grounding.is_grounded(
+        "Penyebutnya pesanan terkirim, bukan seluruh pesanan: 359, bukan 400.",
+        response.results,
+    )
+
+
+def test_asserting_the_count_without_computing_it_is_still_refused(
+    dataset: pd.DataFrame,
+) -> None:
+    """The guard that makes the rule above necessary - and it stays in place."""
+
+    from backend.agents.agent import build_agent
+    from backend.agents.orchestrator import answer_question
+    from backend.tests.scripted_model import ScriptedChatModel, says
+
+    response = answer_question(
+        DENOMINATOR_QUESTION,
+        build_agent(
+            ScriptedChatModel(
+                script=[says("400 adalah total pesanan, tetapi penyebutnya yang terkirim.")]
+            )
+        ),
+        dataset,
+    )
+
+    assert response.unsupported is True
