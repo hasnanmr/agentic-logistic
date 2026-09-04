@@ -236,6 +236,34 @@ def test_explicit_filter_is_allowed(dataset: pd.DataFrame) -> None:
     assert response.results[0].explainability.resolved_filters.filters
 
 
+def test_explicit_date_filter_is_allowed(dataset: pd.DataFrame) -> None:
+    response = ask(
+        "Which carrier has the highest delay rate after 2025-01-01?",
+        script_for(
+            ToolCall(
+                QUERY_TOOL,
+                {
+                    "metric": "delay_rate",
+                    "dimensions": ["carrier"],
+                    "filters": [
+                        {
+                            "field": "order_date",
+                            "op": "gte",
+                            "value": "2025-01-01",
+                        }
+                    ],
+                },
+            )
+        ),
+        dataset,
+    )
+
+    assert response.unsupported is False
+    assert response.results[0].explainability.resolved_filters.filters[0].field == (
+        "order_date"
+    )
+
+
 def test_the_dataset_never_enters_the_conversation(dataset: pd.DataFrame) -> None:
     model = ScriptedChatModel(script=script_for(RANKING))
     run_agent("Which carrier is worst?", dataset, agent=build_agent(model))

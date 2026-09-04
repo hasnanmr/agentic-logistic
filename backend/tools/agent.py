@@ -11,6 +11,7 @@ its context (PRD 9).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 import re
 from time import perf_counter
 from typing import Any, Final
@@ -49,6 +50,21 @@ _REGION_ALIASES: Final[dict[str, frozenset[str]]] = {
     "US-C": frozenset({"us central", "central us", "central united states"}),
 }
 
+_MONTH_ALIASES: Final[dict[int, frozenset[str]]] = {
+    1: frozenset({"january", "januari"}),
+    2: frozenset({"february", "februari"}),
+    3: frozenset({"march", "maret"}),
+    4: frozenset({"april"}),
+    5: frozenset({"may", "mei"}),
+    6: frozenset({"june", "juni"}),
+    7: frozenset({"july", "juli"}),
+    8: frozenset({"august", "agustus"}),
+    9: frozenset({"september"}),
+    10: frozenset({"october", "oktober"}),
+    11: frozenset({"november"}),
+    12: frozenset({"december", "desember"}),
+}
+
 
 def _normalise_filter_text(value: object) -> str:
     """Make user phrases comparable without changing their meaning."""
@@ -56,9 +72,36 @@ def _normalise_filter_text(value: object) -> str:
     return re.sub(r"[^a-z0-9]+", " ", str(value).lower()).strip()
 
 
+def _filter_value_candidates(value: object) -> set[str]:
+    candidates = {_normalise_filter_text(value)}
+    raw = str(value)
+    try:
+        parsed = date.fromisoformat(raw)
+    except ValueError:
+        parsed = None
+    if parsed is not None:
+        day, month, year = parsed.day, parsed.month, parsed.year
+        candidates.update(
+            {
+                f"{year} {month} {day}",
+                f"{day} {month} {year}",
+                f"{month} {day} {year}",
+            }
+        )
+        for month_name in _MONTH_ALIASES[month]:
+            candidates.update(
+                {
+                    f"{day} {month_name} {year}",
+                    f"{month_name} {day} {year}",
+                    f"{month_name} {year}",
+                }
+            )
+    return candidates
+
+
 def _filter_value_was_requested(question: str, value: object) -> bool:
     text = _normalise_filter_text(question)
-    candidates = {_normalise_filter_text(value)}
+    candidates = _filter_value_candidates(value)
     candidates.update(_REGION_ALIASES.get(str(value), ()))
     return any(
         candidate
@@ -118,6 +161,9 @@ class RunCollector:
 
     question: str
     frame: pd.DataFrame
+    #: User-authored text from the current turn and any replayed history.
+    #: This lets an explicitly requested filter survive a follow-up turn.
+    filter_context: str = ""
     results: list[AskResult] = field(default_factory=list)
     failures: list[ToolFailure] = field(default_factory=list)
     #: Set when the agent declared the dataset cannot answer the question, so
@@ -236,7 +282,7 @@ def query_tool(runtime: ToolRuntime, **arguments: Any) -> str:
         {**arguments, "operation": "query"}
     )
     try:
-        validate_filters_follow_user(collector.question, request.filters)
+        validate_filters_follow_user(collector.filter_context, request.filters)
         result = run_query(request, collector.frame)
         resolved = prepare(request, collector.frame)
     except (QueryToolError, KeyError) as error:
@@ -320,7 +366,7 @@ def forecast_tool(runtime: ToolRuntime, **arguments: Any) -> str:
         {**arguments, "operation": "forecast"}
     )
     try:
-        validate_filters_follow_user(collector.question, request.filters)
+        validate_filters_follow_user(collector.filter_context, request.filters)
         result = run_forecast(request, collector.frame)
     except (QueryToolError, KeyError) as error:
         reason = str(error).strip("'")

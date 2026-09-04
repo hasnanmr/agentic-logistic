@@ -58,7 +58,7 @@ def test_ranking_numbers_reconcile_between_dashboard_and_ask(
     api_rows = api_result.json()["rows"]
 
     ask_response = answer_question(
-        "Which carrier has the highest delay rate?",
+        "Which carrier has the highest delay rate in US-E and US-W?",
         agent_calling("query_tool", DELAY_RATE_BY_CARRIER),
     )
 

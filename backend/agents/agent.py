@@ -77,9 +77,12 @@ percentage, count, or date value in your own text - refer to what you looked at
 instead ("delay rate by carrier, ranked", "the four-week projection").
 
 Filters must follow the user's wording exactly. Do not add a carrier, region,
-status, city, category, or date filter that the user did not request. For an
-overall question, send filters: []. If a filter is rejected because it was not
-stated by the user, remove it and call the tool again.
+status, city, category, or date filter that the user did not request. Carrier
+names and exact dates count as explicit filter values when the user mentions
+them. Relative periods such as "last month" should use time_range, not an
+invented date filter. For an overall question, send filters: []. If a filter
+is rejected because it was not stated by the user, remove it and call the tool
+again.
 
 If a call is rejected, read the reason and correct the arguments; the schemas
 are exact. Extract the horizon for forecasts ("the next 4 weeks" ->
@@ -325,7 +328,17 @@ def run_agent(
     """
 
     graph = get_agent() if agent is None else agent
-    collector = RunCollector(question=question, frame=frame)
+    user_turns = [
+        turn["content"]
+        for turn in history or []
+        if turn.get("role") == "user"
+    ]
+    filter_context = "\n".join([*user_turns, question])
+    collector = RunCollector(
+        question=question,
+        frame=frame,
+        filter_context=filter_context,
+    )
 
     resumed = thread_id is not None
     thread = thread_id or f"ask-{uuid.uuid4().hex}"

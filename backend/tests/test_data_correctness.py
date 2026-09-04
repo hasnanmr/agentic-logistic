@@ -259,7 +259,18 @@ def agent_rows(dataset: pd.DataFrame, request: dict[str, Any]):
     the numbers rather than about pydantic.
     """
 
-    response = answer_question("sweep", agent_calling(request), dataset)
+    filter_values = [
+        str(value)
+        for request_filter in request.get("filters", [])
+        for value in (
+            request_filter["value"]
+            if isinstance(request_filter["value"], list)
+            else [request_filter["value"]]
+        )
+    ]
+    response = answer_question(
+        "sweep " + " ".join(filter_values), agent_calling(request), dataset
+    )
     assert response.unsupported is False, response.unsupported_reason
     assert response.table is not None
     return response.table.model_dump(mode="json")["rows"]
