@@ -18,6 +18,7 @@ Two deliberate departures from the deepagents defaults:
 
 from __future__ import annotations
 
+import logging
 import os
 import uuid
 from collections import OrderedDict
@@ -38,6 +39,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
+from backend import observability
 from backend.agent_tools import (
     AGENT_TOOLS,
     ANALYTICS_TOOLS,
@@ -45,9 +47,12 @@ from backend.agent_tools import (
     RunCollector,
 )
 from backend.answers import SUPPORTED_CAPABILITIES
-from backend.llm import get_chat_model, require_api_key
+from backend.llm import DEFAULT_MODEL, get_chat_model, require_api_key
 from backend.query_tool import QueryToolError
 from backend.schemas import PlanStep
+
+
+logger = logging.getLogger("backend.agent")
 
 
 SYSTEM_PROMPT: Final = f"""You are the analyst behind a logistics dashboard. You
@@ -314,13 +319,39 @@ def run_agent(
     incoming: list[BaseMessage] = [] if resumed else _history_messages(history)
     incoming.append(HumanMessage(question))
 
-    state = graph.invoke(
-        {"messages": incoming},
-        context=AgentContext(collector=collector),
-        config={"configurable": {"thread_id": thread}},
-    )
+    model_name = os.environ.get("LLM_MODEL") or DEFAULT_MODEL
+    with observability.traced_ask_request(
+        question=question, thread_id=thread, model=model_name
+    ) as trace:
+        if trace.enabled:
+            logger.info(
+                "ask_operations thread=%s langfuse_trace=%s", thread, trace.trace_id
+            )
+        state = graph.invoke(
+            {"messages": incoming},
+            context=AgentContext(collector=collector),
+            config={
+                "configurable": {"thread_id": thread},
+                "callbacks": trace.callbacks,
+                "metadata": trace.run_config_metadata(
+                    thread_id=thread, model=model_name
+                ),
+            },
+        )
 
-    added = _added_messages(list(state["messages"]))
+        added = _added_messages(list(state["messages"]))
+        tool_errors = [
+            str(message.content)
+            for message in added
+            if isinstance(message, ToolMessage) and message.status == "error"
+        ]
+        trace.annotate(
+            output={
+                "results_recorded": len(collector.results),
+                "tool_errors": len(tool_errors),
+                "declined": collector.decline is not None,
+            }
+        )
     narration = next(
         (
             message.text
@@ -329,11 +360,6 @@ def run_agent(
         ),
         "",
     )
-    tool_errors = [
-        str(message.content)
-        for message in added
-        if isinstance(message, ToolMessage) and message.status == "error"
-    ]
 
     return AgentRun(
         collector=collector,

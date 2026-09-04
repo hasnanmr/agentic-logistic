@@ -96,6 +96,12 @@ Backend (`.env`):
 | `ASK_NARRATION` | No | `composed` makes the server write answer prose; `verified` permits model prose only when every number is grounded in tool output. Invalid values fall back to `composed`. |
 | `DATA_CSV_PATH` | No | Logistics CSV path, resolved from the backend process working directory. |
 | `FRONTEND_ORIGIN` | No | The one browser origin allowed by CORS. |
+| `LANGFUSE_PUBLIC_KEY` | No | Langfuse project public key. Tracing is skipped, with no error, when this or the secret key is unset — see [Observability](#observability-langfuse-tracing). |
+| `LANGFUSE_SECRET_KEY` | Yes | Langfuse project secret key. |
+| `LANGFUSE_BASE_URL` | No | Self-hosted or region-specific Langfuse host. Omit for Langfuse's default cloud host. |
+| `LANGFUSE_ENABLED` | No | Explicit override: `true` forces tracing on, `false` forces it off regardless of the keys above. |
+| `LANGFUSE_TRACING_ENVIRONMENT` | No | Environment label attached to every trace (e.g. `development`, `staging`, `production`). Defaults to `development`. |
+| `CUSTOM_TAGS` | No | JSON object of extra labels attached to every trace as tags and metadata, e.g. `{"org":"spaceship","project":"dashboard-logistic","developer":"hasnan"}`. Malformed JSON is ignored, not fatal. |
 
 The provider is any OpenAI-compatible chat-completions endpoint. `LLM_MODEL`
 must match what that endpoint expects — OpenRouter ids carry a provider prefix
@@ -190,6 +196,63 @@ Natural-language question ─> POST /api/ask                         │
 | `backend/agent_tools.py` | Validate tool arguments and collect governed result blocks. |
 | `backend/answers.py` / `backend/grounding.py` | Compose answers and verify optional model narration. |
 | `backend/orchestrator.py` | Run one question and assemble the API response. |
+| `backend/observability.py` | Langfuse tracing adapter for Ask Operations, fail-open by construction. |
+
+## Observability (Langfuse tracing)
+
+Every `POST /api/ask` run that reaches the agent (i.e. not a small-talk or
+carrier-glossary shortcut) can be wrapped in a Langfuse trace: one root span
+per request, a generation span per model call, and a span per `query_tool` /
+`forecast_tool` / `decline_tool` call — all nested automatically because the
+LangChain callback handler is attached to the agent's `invoke` config. The
+trace is tagged with the conversation's `thread_id` (as the Langfuse session)
+and a deployment-environment label, so a support conversation can be
+correlated end to end.
+
+**This is entirely optional and fails open.** If `LANGFUSE_PUBLIC_KEY` or
+`LANGFUSE_SECRET_KEY` is unset, tracing is skipped with no log line and no
+network call — the default state for a fresh checkout. If Langfuse is
+misconfigured or unreachable, the adapter catches the failure, logs a warning,
+and the request completes normally; a broken exporter has been verified to
+neither raise nor add meaningful latency to the response (the SDK batches and
+exports off the request path). Nothing about the answer, the dashboard, or the
+existing `explainability` payload — the user-facing "how this was produced"
+view — changes based on whether tracing is on.
+
+**Local setup:**
+
+1. Create a free project at Langfuse (self-hosted or cloud) and copy its
+   public/secret key pair.
+2. Add to `.env`:
+   ```
+   LANGFUSE_PUBLIC_KEY=pk-lf-...
+   LANGFUSE_SECRET_KEY=sk-lf-...
+   LANGFUSE_BASE_URL=   # leave blank for Langfuse Cloud, or set your self-hosted URL
+   ```
+3. Ask a question through `/api/ask` and check the Langfuse project's Traces
+   view for `ask-operations-request`.
+
+Optionally set `CUSTOM_TAGS` to a JSON object to stamp every trace with extra
+labels (team, project, owner, ...), e.g.:
+```
+CUSTOM_TAGS={"org":"spaceship","project":"dashboard-logistic","developer":"hasnan"}
+```
+Each key becomes both a `key:value` tag (filterable in the Traces list) and a
+metadata field on the trace.
+
+**Production:** set the same three variables through the deployment
+platform's secret store, never in a committed file — `.env.example` documents
+the variable names only, with empty values. Set `LANGFUSE_TRACING_ENVIRONMENT`
+per deployment (`staging`, `production`, ...) so traces from different
+environments don't mix in one project view. `LANGFUSE_ENABLED=false` is the
+kill switch if tracing ever needs to be disabled without removing the keys.
+
+Correlation: when tracing is active, the backend logs
+`ask_operations thread=<thread_id> langfuse_trace=<trace_id>` at INFO level, so
+an application log line can be matched to its Langfuse trace for debugging. No
+API key, password, or other credential is ever sent to Langfuse — outgoing
+metadata is passed through `backend.observability.redact`, which masks any
+key whose name looks credential-shaped.
 
 ## How questions are interpreted and tools are selected
 

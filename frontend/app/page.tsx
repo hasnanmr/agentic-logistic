@@ -46,6 +46,8 @@ interface CarrierRow {
   delivered: number;
   delayed: number;
   delayRate: number | null;
+  onTimeRate: number | null;
+  avgDeliveryTime: number | null;
 }
 
 const CHART_LIMIT = 100;
@@ -124,6 +126,8 @@ export default function DashboardPage() {
         delayedByCarrier,
         delayRateByCarrier,
         totalByCarrier,
+        onTimeRateByCarrier,
+        avgDeliveryTimeByCarrier,
       ] = await Promise.all([
         runQuery(scalarQuery("total_orders", requestFilters)),
         runQuery(scalarQuery("delivered_orders", requestFilters)),
@@ -174,11 +178,27 @@ export default function DashboardPage() {
           filters: requestFilters,
           limit: CHART_LIMIT,
         }),
+        runQuery({
+          operation: "query",
+          metric: "on_time_rate",
+          dimensions: ["carrier"],
+          filters: requestFilters,
+          limit: CHART_LIMIT,
+        }),
+        runQuery({
+          operation: "query",
+          metric: "avg_delivery_time",
+          dimensions: ["carrier"],
+          filters: requestFilters,
+          limit: CHART_LIMIT,
+        }),
       ]);
 
       const deliveredMap = new Map(deliveredByCarrier.rows.map((row) => [String(row[0]), Number(row[1])]));
       const delayedMap = new Map(delayedByCarrier.rows.map((row) => [String(row[0]), Number(row[1])]));
       const rateMap = new Map(delayRateByCarrier.rows.map((row) => [String(row[0]), row[1]]));
+      const onTimeRateMap = new Map(onTimeRateByCarrier.rows.map((row) => [String(row[0]), row[1]]));
+      const avgDeliveryTimeMap = new Map(avgDeliveryTimeByCarrier.rows.map((row) => [String(row[0]), row[1]]));
 
       const rows: CarrierRow[] = totalByCarrier.rows.map((row) => {
         const carrier = String(row[0]);
@@ -186,12 +206,17 @@ export default function DashboardPage() {
         const carrierDelivered = deliveredMap.get(carrier) ?? 0;
         const carrierDelayed = delayedMap.get(carrier) ?? 0;
         const rawRate = rateMap.get(carrier);
+        const rawOnTimeRate = onTimeRateMap.get(carrier);
+        const rawAvgDeliveryTime = avgDeliveryTimeMap.get(carrier);
         return {
           carrier,
           total,
           delivered: carrierDelivered,
           delayed: carrierDelayed,
           delayRate: rawRate === null || rawRate === undefined ? null : Number(rawRate),
+          onTimeRate: rawOnTimeRate === null || rawOnTimeRate === undefined ? null : Number(rawOnTimeRate),
+          avgDeliveryTime:
+            rawAvgDeliveryTime === null || rawAvgDeliveryTime === undefined ? null : Number(rawAvgDeliveryTime),
         };
       });
       rows.sort((a, b) => {
@@ -386,13 +411,23 @@ export default function DashboardPage() {
             ) : (
               <DataTable
                 result={{
-                  columns: ["carrier", "total_orders", "delivered_orders", "delayed_orders", "delay_rate"],
+                  columns: [
+                    "carrier",
+                    "total_orders",
+                    "delivered_orders",
+                    "delayed_orders",
+                    "on_time_rate",
+                    "delay_rate",
+                    "avg_delivery_time",
+                  ],
                   rows: carrierRows.map((row) => [
                     row.carrier,
                     row.total,
                     row.delivered,
                     row.delayed,
+                    row.onTimeRate,
                     row.delayRate,
+                    row.avgDeliveryTime,
                   ]),
                   row_count: carrierRows.length,
                   total_groups: carrierRows.length,

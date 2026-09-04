@@ -7,7 +7,7 @@
 | Source PRD | v2.0 |
 | Effort (sum of all tasks) | **~13h35m** — above the source spec's 6–10h guidance. Parallelizing cuts wall-clock, not effort; see "If short on time". |
 | Wall-clock if parallelized | **~6h** with 3–4 workers (Wave 0 45m → longest Wave 1 stream, C at 3h15m → Wave 2 1h15m → Wave 3 45m) |
-| Status | Wave 0 + Streams A/B1/B2/D/E + Wave 2 complete — `schemas.py`, `fixtures.py`, routers, `test_wave0.py`, frontend dashboard + Ask Operations (ports: FE 3001, BE 8080), `test_reconciliation.py` all landed. Ask Operations now supports follow-up questions: stateless 10-turn conversation history replayed by the client per request (`AskRequest.history`), chat UI on /ask, bounded in `test_ask_turns.py` |
+| Status | Wave 0 + Streams A/B1/B2/D/E/G + Wave 2 (incl. I.6) complete — `schemas.py`, `fixtures.py`, routers, `test_wave0.py`, frontend dashboard + Ask Operations (ports: FE 3001, BE 8080), `test_reconciliation.py` all landed. Ask Operations now supports follow-up questions: stateless 10-turn conversation history replayed by the client per request (`AskRequest.history`), chat UI on /ask, bounded in `test_ask_turns.py`. Langfuse tracing wired into `backend/agent.py`'s `run_agent`, fail-open, tested in `test_observability.py` |
 | Dataset | `mock_logistics_data.csv` (400 rows, 2025-01-01 to 2025-12-30, 1 row = 1 order) |
 | Ground-truth KPI values | Total Orders 400 · Delivered Orders 359 · Delayed Orders 55 · On-Time Rate 84.68% · Delay Rate 15.32% · Avg Delivery Time 3.83 days |
 
@@ -328,11 +328,11 @@ Required downstream behavior:
 
 *Adds operational tracing for the AI request lifecycle without making Langfuse a runtime dependency for answering questions.*
 
-- [ ] **G.1** (10 min) Add the Langfuse SDK and document the required environment variables: `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL`, plus an enable/disable flag if needed. Use deployment secret management or a local untracked `.env`; never commit secret values.
-- [ ] **G.2** (20 min) Create `backend/observability.py` as a no-op-safe adapter that starts and flushes a root trace per Ask Operations request, with configurable host and enabled state. It must fail open: tracing errors must not fail or materially delay the user response.
-- [ ] **G.3** (25 min) Instrument the end-to-end agent lifecycle: root trace for the question/request, generation spans for model calls, spans for query/forecast/decline tool calls, and captured duration, status, errors, selected model, `thread_id`, and deployment environment. Redact API keys and unnecessary personal/sensitive data.
-- [ ] **G.4** (10 min) Correlate the Langfuse trace ID with application request/answer logs and, if the response contract is extended, expose only the non-secret trace ID for support/debugging. Keep the existing explainability payload as the user-facing “how this answer was produced” view.
-- [ ] **G.5** (10 min) Add tests for enabled and disabled tracing, flush/error fallback, redaction, and one trace containing model plus tool observations. Document local setup and production secret configuration in `README.md`.
+- [x] **G.1** (10 min) Add the Langfuse SDK and document the required environment variables: `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL`, plus an enable/disable flag if needed. Use deployment secret management or a local untracked `.env`; never commit secret values.
+- [x] **G.2** (20 min) Create `backend/observability.py` as a no-op-safe adapter that starts and flushes a root trace per Ask Operations request, with configurable host and enabled state. It must fail open: tracing errors must not fail or materially delay the user response.
+- [x] **G.3** (25 min) Instrument the end-to-end agent lifecycle: root trace for the question/request, generation spans for model calls, spans for query/forecast/decline tool calls, and captured duration, status, errors, selected model, `thread_id`, and deployment environment. Redact API keys and unnecessary personal/sensitive data.
+- [x] **G.4** (10 min) Correlate the Langfuse trace ID with application request/answer logs and, if the response contract is extended, expose only the non-secret trace ID for support/debugging. Keep the existing explainability payload as the user-facing “how this answer was produced” view.
+- [x] **G.5** (10 min) Add tests for enabled and disabled tracing, flush/error fallback, redaction, and one trace containing model plus tool observations. Document local setup and production secret configuration in `README.md`.
 
 **Done when:** every `/api/ask` analytics request creates a searchable Langfuse trace containing the model and governed tool steps, trace failures leave the API response unaffected, and no credential or unredacted sensitive value is sent to Langfuse.
 
@@ -357,7 +357,7 @@ Required downstream behavior:
 - [x] **I.3** (15 min) C → backend: flip the API client off fixtures. Verify dashboard numbers match the ground truth and that Ask Operations renders real answers, charts, and explainability.
 - [x] **I.4** (10 min) A → everything: enable the auth guard on all routers; confirm the frontend still works through the gate.
 - [x] **I.5** (10 min) Reconciliation check: the same metric+filter through the dashboard and through Ask Operations returns identical numbers. *(NFR-01 — this is the single most likely place to lose Data Correctness points.)*
-- [ ] **I.6** (15 min) G → E: wire the observability adapter into the live agent/orchestrator boundaries, verify model/tool spans for a real Ask Operations request, and confirm tracing remains non-blocking when Langfuse is unavailable.
+- [x] **I.6** (15 min) G → E: wire the observability adapter into the live agent/orchestrator boundaries, verify model/tool spans for a real Ask Operations request, and confirm tracing remains non-blocking when Langfuse is unavailable.
 
 ---
 
