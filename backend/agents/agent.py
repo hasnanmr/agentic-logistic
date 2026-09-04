@@ -56,7 +56,7 @@ from backend.tools.agent import (
     AgentContext,
     RunCollector,
 )
-from backend.core.answers import SUPPORTED_CAPABILITIES
+from backend.core.answers import METRIC_DEFINITIONS, SUPPORTED_CAPABILITIES
 from backend.core.llm import DEFAULT_MODEL, get_chat_model, require_api_key
 from backend.tools.query import QueryToolError
 from backend.core.schemas import PlanStep
@@ -127,6 +127,16 @@ sentences and with no tool at all:
 - A greeting or small talk: greet the person back and say what you can look up.
 - A question about you or what you can do: answer it directly and name the
   metrics, breakdowns and forecasting you have.
+- A question about how a metric is defined or computed - "how do you get the
+  delay rate?", "what counts as delivered?" - is a question about the rules,
+  not about the data. Answer it from the metric definitions listed below,
+  wording it as they do. Do not invent a formula and do not paraphrase the
+  denominator into something else; delay_rate is a share of delivered orders,
+  not of total orders. This is the one case where a constant such as the x 100
+  that turns a ratio into a percentage may appear in your text - it comes from
+  the definition, not from the data. A figure measured *from* the data is still
+  never yours to state, so "how is the delay rate defined" is yours to answer
+  and "what is the delay rate" is a query_tool call.
 
 A question that does want data this dataset cannot express - cost, profit,
 customer satisfaction, the cause of something - is different: call decline_tool
@@ -135,6 +145,8 @@ with the reason, then tell the user plainly. Do not answer it from prose alone.
 Never invent a figure in any reply; you have no data in front of you.
 
 {SUPPORTED_CAPABILITIES}
+
+{METRIC_DEFINITIONS}
 
 Informational questions about a named carrier are handled by the application's
 source-backed carrier glossary before this agent runs. The glossary covers

@@ -96,3 +96,58 @@ def test_row_counts_and_metric_bases_are_grounded(dataset: pd.DataFrame) -> None
     basis = result.explainability.metric_basis.row_count
 
     assert grounding.is_grounded(f"{groups} groups over {basis} orders.", [result])
+
+
+# --- explaining a metric, with nothing computed ----------------------------
+#
+# "How do you get the delay rate?" asks about the application's rules, not
+# about the data, so no tool runs and there is no result to trace against. The
+# x 100 in the registry's own formula used to be read as an invented figure,
+# which threw the whole answer away and refused the question instead.
+
+
+def test_a_registry_formula_may_be_stated_with_nothing_computed() -> None:
+    assert grounding.is_grounded(
+        "Delay rate is delayed orders / delivered orders x 100.", []
+    )
+    assert grounding.is_grounded(
+        "On-time rate is on-time delivered orders / delivered orders x 100.", []
+    )
+
+
+def test_only_the_registry_constants_are_admitted() -> None:
+    """The widening is exactly the numbers the registry writes, nothing more -
+    a measurement stated with no tool call is still refused."""
+
+    assert grounding._DEFINITION_NUMBERS == frozenset({Decimal("100")})
+    assert not grounding.is_grounded("The delay rate is 28.57%.", [])
+    assert not grounding.is_grounded("There were 4210 delayed orders.", [])
+
+
+def test_the_agent_can_explain_a_metric_instead_of_refusing(
+    dataset: pd.DataFrame,
+) -> None:
+    """End to end: the reply reaches the user rather than the canned refusal."""
+
+    from backend.agents.agent import build_agent
+    from backend.agents.orchestrator import answer_question
+    from backend.tests.scripted_model import ScriptedChatModel, says
+
+    definition = "Delay rate is delayed orders / delivered orders x 100."
+    response = answer_question(
+        "how do you got the delay rate?",
+        build_agent(ScriptedChatModel(script=[says(definition)])),
+        dataset,
+    )
+
+    assert response.unsupported is False
+    assert response.answer == definition
+
+
+def test_the_prompt_carries_the_registry_denominator() -> None:
+    """The model was inventing the formula and getting it wrong - explaining
+    delay_rate as a share of total orders. It answers from these words now."""
+
+    from backend.core.answers import METRIC_DEFINITIONS
+
+    assert "delay_rate = delayed orders / delivered orders x 100" in METRIC_DEFINITIONS

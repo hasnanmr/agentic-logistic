@@ -42,6 +42,21 @@ SUPPORTED_CAPABILITIES: Final = (
     "Demand can be forecast 1-8 weeks ahead."
 )
 
+#: The registry's own formula for every metric, for the agent's system prompt.
+#: A question about *how* a figure is defined - "how do you get the delay
+#: rate?" - is a question about the application's own rules, so the agent has
+#: to be told them. Without this it invents a plausible formula and gets it
+#: wrong: it explained delay_rate as a share of total orders, when the
+#: denominator is delivered orders. English only, like SUPPORTED_CAPABILITIES:
+#: the model reads it, the user never does.
+METRIC_DEFINITIONS: Final = (
+    "Metric definitions, which are the application's own rules: "
+    + "; ".join(
+        f"{name} = {METRICS[name].definition_text}" for name in sorted(METRICS)
+    )
+    + "."
+)
+
 _SUPPORTED_CAPABILITIES_ID: Final = (
     "Metrik yang didukung: "
     + ", ".join(sorted(METRICS))

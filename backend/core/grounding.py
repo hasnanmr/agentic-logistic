@@ -7,7 +7,10 @@ narration states and confirms each one appears in the computed results, so an
 agent-written answer can be accepted on evidence rather than on trust.
 
 A number the tools never produced fails the check and the narration is dropped
-in favour of composed prose - the invariant holds either way (PRD 9).
+in favour of composed prose - the invariant holds either way (PRD 9). The one
+addition to "computed results" is the constants the metric registry writes its
+own formulas with, so the agent can explain how a metric is defined without the
+x 100 in the formula reading as an invented measurement.
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ import re
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Final, Iterable
 
+from backend.core.metrics import METRICS
 from backend.core.schemas import AskResult
 
 
@@ -42,15 +46,44 @@ def extract_numbers(text: str) -> list[Decimal]:
     return found
 
 
+def _definition_numbers() -> frozenset[Decimal]:
+    """Constants that belong to the metric registry's own formulas.
+
+    ``grounded_numbers`` already admits the numbers in a result's
+    ``metric_definition``, on the principle that a number written by the
+    registry is the application's, not the model's. These are the same numbers,
+    admitted with no result to hang them on - which is what an answer about how
+    a metric is *defined* needs, since nothing was computed for it.
+
+    In practice this is the single value 100, the multiplier that turns a ratio
+    into a percentage. Without it "delay rate is delayed orders / delivered
+    orders x 100" is thrown out as an ungrounded figure and the user gets a
+    refusal instead of the definition. The cost is that a bare "the delay rate
+    is 100%" would also pass this check on the tool-free path; that is a narrow
+    and deliberate trade, and every other invented figure is still rejected.
+    """
+
+    return frozenset(
+        number
+        for definition in METRICS.values()
+        for number in extract_numbers(definition.definition_text)
+    )
+
+
+#: Computed once: the registry is frozen at import.
+_DEFINITION_NUMBERS: Final = _definition_numbers()
+
+
 def grounded_numbers(results: Iterable[AskResult]) -> set[Decimal]:
-    """Every number the tools actually computed for this run.
+    """Every number a narration for this run is allowed to state.
 
     Drawn from the payload the user can inspect - table cells, row counts,
     metric bases, forecast details and the composed prose - so anything a
-    narration says can be traced to something on screen.
+    narration says can be traced to something on screen, plus the constants
+    the metric registry's own formulas are written with.
     """
 
-    allowed: set[Decimal] = set()
+    allowed: set[Decimal] = set(_DEFINITION_NUMBERS)
 
     def admit(value: object) -> None:
         if isinstance(value, bool) or value is None:

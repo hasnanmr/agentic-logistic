@@ -365,21 +365,27 @@ key whose name looks credential-shaped.
    Indonesian, or Chinese templates. Informational questions about a supported
    carrier are answered from a source-backed local glossary. Neither path calls
    the model.
-2. For an analytical question, the temperature-zero LLM resolves conversational
+2. A question about how a metric is *defined* rather than what it currently
+   measures — "how do you get the delay rate?" — is answered by the agent from
+   the metric registry's own formulas, which are carried in its system prompt.
+   No tool runs, so no figure is computed; the constants those formulas are
+   written with (the `x 100` of a percentage) are the only numbers such a reply
+   may state.
+3. For an analytical question, the temperature-zero LLM resolves conversational
    context and translates the wording into an allow-listed metric, dimensions,
    filters, time range, sort, limit, or forecast horizon.
-3. The model selects `query_tool` for historical counts, rates, delivery time,
+4. The model selects `query_tool` for historical counts, rates, delivery time,
    trends, comparisons, and rankings; `forecast_tool` for future weekly order
    demand; or `decline_tool` when the requested information is absent.
-4. Compound questions produce one tool call per distinct figure or comparison
+5. Compound questions produce one tool call per distinct figure or comparison
    window. Open-ended requests such as “where are delays concentrated?” may be
    delegated to a restricted trend investigator that runs several governed
    breakdowns.
-5. Tool arguments are validated. A rejected call is returned to the agent so
+6. Tool arguments are validated. A rejected call is returned to the agent so
    it can correct the arguments within the run limits (8 model calls and 12
    tool calls). If no valid computation is possible, the API returns HTTP 200
    with `unsupported: true` and an explanation instead of guessing.
-6. The tool computes and stores the result while exposing only a receipt to the
+7. The tool computes and stores the result while exposing only a receipt to the
    model. Application code then creates the answer, table, chart, and trace.
 
 Follow-ups can send the returned `thread_id`; otherwise clients may replay up
