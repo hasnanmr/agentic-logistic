@@ -6,7 +6,7 @@ against a scripted model in tests with no API key, and swapping providers
 touches nothing else.
 
 The model's job is choosing tools and their arguments. It never sees the
-dataset and never produces a number - see :mod:`backend.agent_tools`.
+dataset and never produces a number - see :mod:`backend.tools.agent`.
 """
 
 from __future__ import annotations

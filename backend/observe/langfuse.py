@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterator
 
 
-logger = logging.getLogger("backend.observability")
+logger = logging.getLogger("backend.observe.langfuse")
 
 #: Keys redacted from anything sent to Langfuse, case-insensitively. Belt and
 #: braces: nothing here should ever hold a credential, but a metadata dict
@@ -51,6 +51,17 @@ def is_enabled() -> bool:
         os.environ.get("LANGFUSE_SECRET_KEY")
     )
     return _flag("LANGFUSE_ENABLED", default=has_keys)
+
+
+def include_query_source_rows() -> bool:
+    """Whether Langfuse may receive the filtered source rows for a query.
+
+    Aggregated query results are safe and useful for auditability, so they are
+    always attached to the query observation. Raw shipment rows are opt-in
+    because a real deployment may contain sensitive operational data.
+    """
+
+    return _flag("LANGFUSE_INCLUDE_QUERY_SOURCE_ROWS", default=False)
 
 
 def deployment_environment() -> str:
@@ -94,6 +105,36 @@ def redact(metadata: dict[str, Any]) -> dict[str, Any]:
         key: ("<redacted>" if key.lower() in _REDACT_KEYS else value)
         for key, value in metadata.items()
     }
+
+
+def annotate_current_observation(
+    *,
+    input: Any | None = None,
+    output: Any | None = None,
+    metadata: dict[str, Any] | None = None,
+    level: str | None = None,
+) -> None:
+    """Attach computed tool input/output to the active Langfuse observation.
+
+    LangChain creates the ``query_tool`` observation before entering the tool
+    function. Updating the current span enriches that existing observation
+    instead of creating a second, detached span. This is best effort for the
+    same reason as the rest of this adapter: observability must never change
+    the answer path.
+    """
+
+    client = _client_or_none()
+    if client is None:
+        return
+    try:
+        client.update_current_span(
+            input=redact(input) if isinstance(input, dict) else input,
+            output=redact(output) if isinstance(output, dict) else output,
+            metadata=redact(metadata) if metadata else None,
+            level=level,
+        )
+    except Exception:
+        logger.debug("Could not annotate current Langfuse observation.", exc_info=True)
 
 
 _client: Any = None

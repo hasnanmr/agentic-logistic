@@ -8,15 +8,15 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.ingestion import load_dataset
+from backend.core.ingestion import load_dataset
 from backend.main import app
-from backend.query_tool import (
+from backend.tools.query import (
     QueryToolError,
     dataset_anchor,
     resolve_time_range,
     run_query,
 )
-from backend.schemas import ExplicitTimeRange, PresetTimeRange, QueryStructuredRequest
+from backend.core.schemas import ExplicitTimeRange, PresetTimeRange, QueryStructuredRequest
 
 
 AUTH = ("reviewer", "s3cret")

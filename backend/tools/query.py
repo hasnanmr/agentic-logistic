@@ -5,7 +5,7 @@ structured request, never a query string, so "no raw AI-generated SQL" holds by
 construction rather than by sanitisation (PRD 9.2).
 
 Every value that reaches pandas has already passed the frozen contract in
-``backend.schemas`` plus the semantic checks below, so an unknown metric,
+``backend.core.schemas`` plus the semantic checks below, so an unknown metric,
 dimension, or operator is rejected before any computation runs (FR-12).
 """
 
@@ -18,9 +18,9 @@ from typing import Final
 
 import pandas as pd
 
-from backend.ingestion import get_dataset
-from backend.metrics import MetricDefinition, get_metric
-from backend.schemas import (
+from backend.core.ingestion import get_dataset
+from backend.core.metrics import MetricDefinition, get_metric
+from backend.core.schemas import (
     ExplicitTimeRange,
     PresetTimeRange,
     QueryResult,

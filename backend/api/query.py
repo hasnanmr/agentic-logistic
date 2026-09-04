@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, status
 
-from backend.query_tool import QueryToolError, run_query
-from backend.schemas import QueryResult, QueryStructuredRequest
+from backend.tools.query import QueryToolError, run_query
+from backend.core.schemas import QueryResult, QueryStructuredRequest
 
 
 router = APIRouter(prefix="/api", tags=["query"])

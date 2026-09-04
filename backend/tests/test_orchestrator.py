@@ -15,20 +15,20 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.chart_rules import forecast_chart, select_chart
-from backend.forecast import run_forecast
-from backend.ingestion import load_dataset
-from backend.agent import build_agent
+from backend.core.chart_rules import forecast_chart, select_chart
+from backend.tools.forecast import run_forecast
+from backend.core.ingestion import load_dataset
+from backend.agents.agent import build_agent
 from backend.main import app
-from backend.agent_tools import DECLINE_TOOL
-from backend.orchestrator import (
+from backend.tools.agent import DECLINE_TOOL
+from backend.agents.orchestrator import (
     FORECAST_TOOL,
     QUERY_TOOL,
     answer_question,
     tool_definitions,
 )
-from backend.query_tool import run_query
-from backend.schemas import ForecastStructuredRequest, QueryStructuredRequest
+from backend.tools.query import run_query
+from backend.core.schemas import ForecastStructuredRequest, QueryStructuredRequest
 from backend.tests.scripted_model import (
     ScriptedChatModel,
     ToolCall,

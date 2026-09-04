@@ -1,6 +1,6 @@
 """Validated Wave 0 fixtures for parallel frontend/orchestrator work."""
 
-from backend.schemas import (
+from backend.core.schemas import (
     AskResponse,
     Explainability,
     ForecastResult,

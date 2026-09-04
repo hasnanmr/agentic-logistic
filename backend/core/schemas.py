@@ -64,7 +64,7 @@ FilterOperator = Literal[
 Scalar = str | int | float | bool | date | None
 
 #: Conversational filler the application answers from templates instead of the
-#: agent - see :mod:`backend.smalltalk`.
+#: agent - see :mod:`backend.core.smalltalk`.
 SmalltalkIntent = Literal[
     "morning",
     "noon",

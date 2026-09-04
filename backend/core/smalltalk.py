@@ -20,7 +20,7 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Final
 
-from backend.schemas import SmalltalkIntent, SmalltalkLanguage
+from backend.core.schemas import SmalltalkIntent, SmalltalkLanguage
 
 
 #: Longest phrase in the Latin table, in tokens.

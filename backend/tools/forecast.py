@@ -31,9 +31,9 @@ from typing import Final
 
 import pandas as pd
 
-from backend.ingestion import get_dataset
-from backend.query_tool import apply_filters, resolve_time_range, validate_filters
-from backend.schemas import (
+from backend.core.ingestion import get_dataset
+from backend.tools.query import apply_filters, resolve_time_range, validate_filters
+from backend.core.schemas import (
     ForecastDetails,
     ForecastPoint,
     ForecastRecommendation,

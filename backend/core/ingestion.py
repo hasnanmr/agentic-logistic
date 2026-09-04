@@ -15,7 +15,7 @@ from typing import Final
 
 import pandas as pd
 
-from backend.status_rules import KNOWN_STATUSES
+from backend.core.status_rules import KNOWN_STATUSES
 
 
 DEFAULT_CSV_PATH: Final = "mock_logistics_data.csv"

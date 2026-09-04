@@ -253,7 +253,7 @@ export default function DashboardPage() {
   const isEmpty = (kpis?.total ?? 0) === 0;
 
   // `delivered` already includes delayed orders (on-time + delayed together
-  // form the Delivered population - see backend/status_rules.py), so the
+  // form the Delivered population - see backend/core/status_rules.py), so the
   // Average Delivery Time basis is delivered + exception, not delivered +
   // delayed + exception (that would double-count the delayed group).
   const avgBasis =

@@ -13,15 +13,15 @@ from datetime import date, timedelta
 import pandas as pd
 import pytest
 
-from backend.forecast import run_forecast, weekly_demand_series
-from backend.ingestion import DatasetError, load_dataset
-from backend.query_tool import (
+from backend.tools.forecast import run_forecast, weekly_demand_series
+from backend.core.ingestion import DatasetError, load_dataset
+from backend.tools.query import (
     PresetTimeRange,
     QueryToolError,
     resolve_time_range,
     run_query,
 )
-from backend.schemas import ForecastStructuredRequest, QueryStructuredRequest
+from backend.core.schemas import ForecastStructuredRequest, QueryStructuredRequest
 
 
 @pytest.fixture(scope="module")

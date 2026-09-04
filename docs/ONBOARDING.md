@@ -100,7 +100,7 @@ open http://localhost:8080/docs
 | `uv add --dev <package>` | Tambah dev dependency |
 | `uv run <command>` | Jalankan command dalam virtual environment |
 | `uv run pytest` | Run tests |
-| `uv run uvicorn backend.main:app` | Run backend server |
+| `uv run uvicorn backend.main:app` | Run backend server from the repository root |
 
 **Key Files:**
 - `pyproject.toml` — Dependency definitions
@@ -201,7 +201,7 @@ git push origin feature/new-feature
 
 ### Adding a New Metric
 
-1. **Define metric** di `backend/metrics.py`:
+1. **Define metric** di `backend/core/metrics.py`:
    ```python
    def _new_metric(frame: pd.DataFrame) -> MetricValue:
        # Implementation
@@ -219,7 +219,7 @@ git push origin feature/new-feature
    )
    ```
 
-2. **Update schema** di `backend/schemas.py` (jika perlu)
+2. **Update schema** di `backend/core/schemas.py` (jika perlu)
 
 3. **Add tests** di `backend/tests/`
 
@@ -237,7 +237,7 @@ git push origin feature/new-feature
        return {"status": "ok"}
    ```
 
-2. **Register router** di `backend/main.py`:
+2. **Create the router** in `backend/api/` and register it in `backend/main.py`:
    ```python
    from backend import new_api
    app.include_router(new_api.router, dependencies=_protected)
@@ -298,8 +298,8 @@ backend/tests/
 ```python
 import pandas as pd
 import pytest
-from backend.query_tool import run_query
-from backend.schemas import QueryStructuredRequest
+from backend.tools.query import run_query
+from backend.core.schemas import QueryStructuredRequest
 
 def test_new_feature():
     request = QueryStructuredRequest(

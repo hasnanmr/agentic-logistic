@@ -11,9 +11,9 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.agent import build_agent
+from backend.agents.agent import build_agent
 from backend.main import app
-from backend.orchestrator import answer_question
+from backend.agents.orchestrator import answer_question
 from backend.tests.scripted_model import ScriptedChatModel, ToolCall, script_for
 
 

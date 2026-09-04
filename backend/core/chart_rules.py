@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Final
 
-from backend.schemas import ChartSpec, ForecastResult, QueryResult
+from backend.core.schemas import ChartSpec, ForecastResult, QueryResult
 
 
 #: Dimensions that place a result on a time axis.

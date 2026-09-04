@@ -12,8 +12,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
-from backend.orchestrator import answer_question
-from backend.smalltalk import compose_smalltalk_answer, is_smalltalk
+from backend.agents.orchestrator import answer_question
+from backend.core.smalltalk import compose_smalltalk_answer, is_smalltalk
 
 
 AUTH = ("reviewer", "s3cret")

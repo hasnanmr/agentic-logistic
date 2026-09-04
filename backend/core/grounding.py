@@ -16,7 +16,7 @@ import re
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Final, Iterable
 
-from backend.schemas import AskResult
+from backend.core.schemas import AskResult
 
 
 #: Digit groups with optional thousands separators and decimals. Leading signs

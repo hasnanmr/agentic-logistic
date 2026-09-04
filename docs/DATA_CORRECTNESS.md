@@ -26,17 +26,17 @@ sama:
    Dashboard                                AI Agent
 POST /api/query                        POST /api/ask
        │                                      │
-       │                                query_tool (agent_tools.py)
+       │                                query_tool (tools/agent.py)
        │                                      │
        └──────────────┬───────────────────────┘
                       ▼
-            query_tool.py  (filter, time range, group by)
+            tools/query.py  (filter, time range, group by)
                       │
                       ▼
-              metrics.py   ← SATU-SATUNYA definisi KPI
+              core/metrics.py   ← SATU-SATUNYA definisi KPI
                       │
                       ▼
-            status_rules.py  ← semantik status order
+            core/status_rules.py  ← semantik status order
                       │
                       ▼
               ingestion.py   ← CSV read-only, tervalidasi
@@ -60,7 +60,7 @@ Dua jalur masuk angka salah dari sisi lain juga tertutup:
 | # | Sumber | Di mana | Yang dibuktikan |
 |---|--------|---------|-----------------|
 | 1 | **Oracle independen** | `test_data_correctness.py::oracle_metrics` | Definisinya sesuai spesifikasi |
-| 2 | **Metric registry** | `backend/metrics.py` | Yang benar-benar dipakai aplikasi |
+| 2 | **Metric registry** | `backend/core/metrics.py` | Yang benar-benar dipakai aplikasi |
 | 3 | **Nilai terpaku** | `test_metrics.py`, `frontend/lib/fixtures.ts` | Tidak ada regresi diam-diam |
 
 Nomor 1 adalah yang tidak bisa dilakukan nilai terpaku. Oracle menghitung ulang
@@ -209,9 +209,9 @@ cd frontend && npm test
 
 Checklist supaya metrik baru ikut terlindungi:
 
-1. **Definisikan** di `backend/metrics.py` (`METRICS`), termasuk
+1. **Definisikan** di `backend/core/metrics.py` (`METRICS`), termasuk
    `allowed_dimensions`, `basis_count`, dan `inclusion_rule`.
-2. **Tambahkan ke `MetricName`** di `backend/schemas.py` — `test_metrics.py`
+2. **Tambahkan ke `MetricName`** di `backend/core/schemas.py` — `test_metrics.py`
    menjaga registry dan literal kontrak agar tidak berpisah.
 3. **Tulis entri oracle** di `oracle_metrics()`, ditranskripsi dari spesifikasi
    dan bukan dari kode yang baru ditulis. `test_the_oracle_covers_every_frozen_metric`
@@ -249,6 +249,6 @@ Jujur soal apa yang **tidak** dijamin di sini:
 | `backend/tests/test_metrics.py` | Nilai KPI terpaku, kelengkapan registry |
 | `backend/tests/test_reconciliation.py` | NFR-01, tiga kasus pilihan tangan |
 | `backend/tests/test_filters.py` | Tiap operator filter, error ingestion |
-| `backend/metrics.py` | Satu-satunya definisi KPI |
-| `backend/status_rules.py` | Semantik status order |
-| `backend/ingestion.py` | Pembacaan CSV tervalidasi |
+| `backend/core/metrics.py` | Satu-satunya definisi KPI |
+| `backend/core/status_rules.py` | Semantik status order |
+| `backend/core/ingestion.py` | Pembacaan CSV tervalidasi |

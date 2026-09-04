@@ -1,13 +1,13 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.carrier_knowledge import (
+from backend.core.carrier_knowledge import (
     CARRIER_DEFINITIONS,
     compose_carrier_answer,
     is_carrier_knowledge_question,
 )
 from backend.main import app
-from backend.orchestrator import answer_question
+from backend.agents.orchestrator import answer_question
 
 
 AUTH = ("reviewer", "s3cret")
@@ -38,6 +38,30 @@ def test_performance_question_stays_on_the_analytics_path() -> None:
     assert not is_carrier_knowledge_question(
         "Which carrier has the highest delay rate?"
     )
+
+
+def test_english_question_gets_an_english_answer() -> None:
+    answer = compose_carrier_answer("What is UPS?")
+
+    assert answer is not None
+    text, definitions = answer
+    assert definitions[0].name == "UPS"
+    assert " is " in text
+    assert "Source:" in text
+    assert "adalah" not in text
+
+
+def test_chinese_question_gets_a_chinese_answer() -> None:
+    """A Han word run directly against a Latin acronym, with no space -
+    the normal way Chinese text names an English brand - must still match."""
+
+    answer = compose_carrier_answer("什么是DHL？")
+
+    assert answer is not None
+    text, definitions = answer
+    assert definitions[0].name == "DHL"
+    assert "来源" in text
+    assert "Sumber" not in text and "Source" not in text
 
 
 def test_carrier_glossary_does_not_need_an_agent() -> None:

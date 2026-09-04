@@ -12,12 +12,12 @@ from decimal import Decimal
 import pandas as pd
 import pytest
 
-from backend import grounding
-from backend.answers import compose_query_answer, query_explainability
-from backend.chart_rules import select_chart
-from backend.ingestion import load_dataset
-from backend.query_tool import prepare, run_query
-from backend.schemas import AskResult, QueryStructuredRequest
+from backend.core import grounding
+from backend.core.answers import compose_query_answer, query_explainability
+from backend.core.chart_rules import select_chart
+from backend.core.ingestion import load_dataset
+from backend.tools.query import prepare, run_query
+from backend.core.schemas import AskResult, QueryStructuredRequest
 
 
 @pytest.fixture(scope="module")

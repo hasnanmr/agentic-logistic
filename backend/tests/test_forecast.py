@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.forecast import (
+from backend.tools.forecast import (
     BASELINE_WINDOW_WEEKS,
     MIN_HISTORY_WEEKS,
     TREND_WINDOW_WEEKS,
@@ -16,9 +16,9 @@ from backend.forecast import (
     run_forecast,
     weekly_demand_series,
 )
-from backend.ingestion import load_dataset
+from backend.core.ingestion import load_dataset
 from backend.main import app
-from backend.schemas import ForecastStructuredRequest
+from backend.core.schemas import ForecastStructuredRequest
 
 
 AUTH = ("reviewer", "s3cret")

@@ -14,10 +14,10 @@ import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, HumanMessage
 
-from backend.agent import MAX_HISTORY_TURNS, build_agent
-from backend.ingestion import load_dataset
+from backend.agents.agent import MAX_HISTORY_TURNS, build_agent
+from backend.core.ingestion import load_dataset
 from backend.main import app
-from backend.orchestrator import QUERY_TOOL, answer_question
+from backend.agents.orchestrator import QUERY_TOOL, answer_question
 from backend.tests.scripted_model import ScriptedChatModel, ToolCall, script_for
 
 
@@ -137,7 +137,7 @@ def test_request_accepts_exactly_ten_turns(
 ) -> None:
     # Keep this contract test independent of provider credentials and network.
     agent, _ = declining_agent()
-    monkeypatch.setattr("backend.ask_api.get_agent", lambda: agent)
+    monkeypatch.setattr("backend.api.ask.get_agent", lambda: agent)
 
     payload = {
         "question": "follow up?",

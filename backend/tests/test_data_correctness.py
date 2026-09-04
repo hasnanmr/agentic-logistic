@@ -33,12 +33,12 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.agent import build_agent
-from backend.agent_tools import QUERY_TOOL
-from backend.ingestion import load_dataset
+from backend.agents.agent import build_agent
+from backend.tools.agent import QUERY_TOOL
+from backend.core.ingestion import load_dataset
 from backend.main import app
-from backend.metrics import METRICS, get_metric
-from backend.orchestrator import answer_question
+from backend.core.metrics import METRICS, get_metric
+from backend.agents.orchestrator import answer_question
 from backend.tests.scripted_model import ScriptedChatModel, ToolCall, script_for
 
 

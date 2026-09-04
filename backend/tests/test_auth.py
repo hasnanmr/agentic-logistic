@@ -67,7 +67,7 @@ def test_unconfigured_credentials_fail_closed(monkeypatch: pytest.MonkeyPatch) -
 def test_config_exposes_no_credential_defaults() -> None:
     """A fallback credential in config would quietly undo the 503 above."""
 
-    from backend import config
+    from backend.core import config
 
     assert not hasattr(config, "APP_USERNAME")
     assert not hasattr(config, "APP_PASSWORD")

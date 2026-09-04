@@ -4,7 +4,7 @@ Built on ``deepagents``, so the model runs a real loop - it can plan with
 ``write_todos``, call a tool, read the receipt, correct rejected arguments, call
 again for a second figure, and delegate open-ended exploration to a subagent.
 What it cannot do is see data or write a number: the tools return receipts and
-file their computed results with the run's collector (:mod:`backend.agent_tools`).
+file their computed results with the run's collector (:mod:`backend.tools.agent`).
 
 Two deliberate departures from the deepagents defaults:
 
@@ -39,20 +39,20 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
-from backend import observability
-from backend.agent_tools import (
+from backend.observe import langfuse as observability
+from backend.tools.agent import (
     AGENT_TOOLS,
     ANALYTICS_TOOLS,
     AgentContext,
     RunCollector,
 )
-from backend.answers import SUPPORTED_CAPABILITIES
-from backend.llm import DEFAULT_MODEL, get_chat_model, require_api_key
-from backend.query_tool import QueryToolError
-from backend.schemas import PlanStep
+from backend.core.answers import SUPPORTED_CAPABILITIES
+from backend.core.llm import DEFAULT_MODEL, get_chat_model, require_api_key
+from backend.tools.query import QueryToolError
+from backend.core.schemas import PlanStep
 
 
-logger = logging.getLogger("backend.agent")
+logger = logging.getLogger("backend.agents.agent")
 
 
 SYSTEM_PROMPT: Final = f"""You are the analyst behind a logistics dashboard. You
@@ -76,12 +76,28 @@ numbers are written for them by application code. So never state a number,
 percentage, count, or date value in your own text - refer to what you looked at
 instead ("delay rate by carrier, ranked", "the four-week projection").
 
+Filters must follow the user's wording exactly. Do not add a carrier, region,
+status, city, category, or date filter that the user did not request. For an
+overall question, send filters: []. If a filter is rejected because it was not
+stated by the user, remove it and call the tool again.
+
 If a call is rejected, read the reason and correct the arguments; the schemas
 are exact. Extract the horizon for forecasts ("the next 4 weeks" ->
 horizon_weeks 4); if a forecast question gives no horizon, use 4.
 
 Never answer from your own knowledge and never invent metrics, dimensions, or
 filters outside the tool schemas.
+
+Always write your own prose - greetings, capability answers, decline reasons,
+and closing summaries - in the same language the user's question was written
+in (Indonesian, English, or Chinese are all expected). Every tool call also
+takes a `language` argument for this same reason: set it to the language of
+the user's question so the application writes the computed answer back in
+that language too. Judge it from the user's actual wording and grammar - an
+English metric, dimension, or carrier name inside an otherwise Indonesian or
+Chinese sentence does not make the sentence English. All other tool arguments
+(metric names, dimensions, filter values) stay in English regardless, since
+those are fixed schema identifiers, not prose.
 
 Not every message is a data question. Answer these yourself, in one or two
 sentences and with no tool at all:

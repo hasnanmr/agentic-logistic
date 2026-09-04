@@ -7,13 +7,13 @@
 | Source PRD | v2.0 |
 | Effort (sum of all tasks) | **~13h35m** — above the source spec's 6–10h guidance. Parallelizing cuts wall-clock, not effort; see "If short on time". |
 | Wall-clock if parallelized | **~6h** with 3–4 workers (Wave 0 45m → longest Wave 1 stream, C at 3h15m → Wave 2 1h15m → Wave 3 45m) |
-| Status | Wave 0 + Streams A/B1/B2/D/E/G + Wave 2 (incl. I.6) complete — `schemas.py`, `fixtures.py`, routers, `test_wave0.py`, frontend dashboard + Ask Operations (ports: FE 3001, BE 8080), `test_reconciliation.py` all landed. Ask Operations now supports follow-up questions: stateless 10-turn conversation history replayed by the client per request (`AskRequest.history`), chat UI on /ask, bounded in `test_ask_turns.py`. Langfuse tracing wired into `backend/agent.py`'s `run_agent`, fail-open, tested in `test_observability.py` |
+| Status | Wave 0 + Streams A/B1/B2/D/E/G + Wave 2 (incl. I.6) complete — contracts, fixtures, routers, backend tests, frontend dashboard + Ask Operations (ports: FE 3001, BE 8080), and reconciliation tests all landed. Backend code is now grouped under `backend/api`, `backend/agents`, `backend/tools`, `backend/observe`, and `backend/core`. Ask Operations supports follow-up questions: stateless 10-turn conversation history replayed by the client per request (`AskRequest.history`), chat UI on /ask, bounded in `test_ask_turns.py`. Langfuse tracing is wired into `backend/agents/agent.py`, fail-open, tested in `test_observability.py` |
 | Dataset | `mock_logistics_data.csv` (400 rows, 2025-01-01 to 2025-12-30, 1 row = 1 order) |
 | Ground-truth KPI values | Total Orders 400 · Delivered Orders 359 · Delayed Orders 55 · On-Time Rate 84.68% · Delay Rate 15.32% · Avg Delivery Time 3.83 days |
 
 ## How parallelization works here
 
-The thing that normally forces this project to be serial is that the frontend waits for the API, the AI orchestrator waits for the Query Tool, and everything waits for ingestion. **Wave 0 removed that by freezing the data contracts up front** (done — see `backend/schemas.py`). After Wave 0, every stream codes against a contract and a fixture — not against another stream's unfinished code. Streams integrate in Wave 2 by deleting their stubs.
+The thing that normally forces this project to be serial is that the frontend waits for the API, the AI orchestrator waits for the Query Tool, and everything waits for ingestion. **Wave 0 removed that by freezing the data contracts up front** (done — see `backend/core/schemas.py`). After Wave 0, every stream codes against a contract and a fixture — not against another stream's unfinished code. Streams integrate in Wave 2 by deleting their stubs.
 
 Rule for every stream: **never edit a file another stream owns.** The file-ownership map at the end is the conflict-avoidance mechanism. Shared files (`main.py`, `schemas.py`) are written once in Wave 0 and then treated as read-only until Wave 2.
 
@@ -42,9 +42,9 @@ WAVE 0 (serial, blocking, ~45m)
 
 *One worker does this alone. Nothing else starts until it lands. Everything here goes into files that are then frozen.*
 
-- [x] **W0.1** (10 min) Repo skeleton: `backend/` (FastAPI) + `frontend/` (React/Next). One `backend/main.py` that imports and registers routers from `auth.py`, `query_api.py`, `ask_api.py`, `forecast_api.py` — create all four router modules now as empty stubs so no stream has to touch `main.py` later.
-- [x] **W0.2** (20 min) Write `backend/schemas.py` with the five contracts below, as Pydantic models. This file is frozen after Wave 0.
-- [x] **W0.3** (10 min) Write `backend/fixtures.py`: one hardcoded sample of each contract's response shape (a fake carrier delay-rate result, a fake forecast result, a fake explainability payload). Streams C and E build against these until Wave 2.
+- [x] **W0.1** (10 min) Repo skeleton: `backend/` (FastAPI) + `frontend/` (React/Next). One `backend/main.py` imports and registers routers from `backend/api/` — `auth.py`, `query.py`, `ask.py`, and `forecast.py`.
+- [x] **W0.2** (20 min) Write `backend/core/schemas.py` with the five contracts below, as Pydantic models. This file is frozen after Wave 0.
+- [x] **W0.3** (10 min) Write `backend/core/fixtures.py`: one hardcoded sample of each contract's response shape (a fake carrier delay-rate result, a fake forecast result, a fake explainability payload). Streams C and E build against these until Wave 2.
 - [x] **W0.4** (5 min) `.env.example` with `APP_USERNAME`, `APP_PASSWORD`, `SESSION_SECRET`, `LLM_API_KEY`, `DATA_CSV_PATH`. Commit no real values.
 
 ### The five frozen contracts
@@ -170,7 +170,7 @@ For `operation: "forecast"` answers, `query_plan` is not enough to make the resu
 
 ### Stream A — Auth: HTTP Basic (~10 min, no dependencies)
 
-- [x] **A.1** (7 min) `backend/auth.py` (currently a stub): `fastapi.security.HTTPBasic` dependency reading `APP_USERNAME`/`APP_PASSWORD` from env, compared with `secrets.compare_digest` (not `==`). Apply it to every protected router. No login page, no cookie, no user table, no session store.
+- [x] **A.1** (7 min) `backend/api/auth.py` (currently a stub): `fastapi.security.HTTPBasic` dependency reading `APP_USERNAME`/`APP_PASSWORD` from env, compared with `secrets.compare_digest` (not `==`). Apply it to every protected router. No login page, no cookie, no user table, no session store.
 - [x] **A.2** (3 min) Remove the now-unused `SESSION_SECRET` line from `.env.example` (Wave 0 wrote it for the cookie design that this replaces), and drop the test credential into `README_NOTES.md` for Stream F to merge in Wave 3.
 
 **Done when:** protected routes return 401 without credentials and pass with them. *(FR-16)*
@@ -181,10 +181,10 @@ For `operation: "forecast"` answers, `query_plan` is not enough to make the resu
 
 *Highest-value stream — Data Correctness is 20% of the grade. Assign your strongest worker here.*
 
-- [x] **B1.1** (10 min) Add `pandas` to `pyproject.toml`, then `backend/ingestion.py`: `pd.read_csv` with explicit `parse_dates=['order_date','delivery_date']`. Load once at import; never mutate the DataFrame — that is the whole of NFR-02, no read-only mode to configure. **No DuckDB**: 400 rows is not an analytical-database workload.
+- [x] **B1.1** (10 min) Add `pandas` to `pyproject.toml`, then `backend/core/ingestion.py`: `pd.read_csv` with explicit `parse_dates=['order_date','delivery_date']`. Load once at import; never mutate the DataFrame — that is the whole of NFR-02, no read-only mode to configure. **No DuckDB**: 400 rows is not an analytical-database workload.
 - [x] **B1.2** (10 min) Column validation: fail loudly with a clear message if any required column is missing. Defensive duplicate-`order_id` check.
-- [x] **B1.3** (10 min) `backend/status_rules.py`: encode status semantics **once** — `delivered`+`delayed` = Delivered Orders; `exception` separate; `in_transit`/`canceled` excluded. Every metric reads from here.
-- [x] **B1.4** (25 min) `backend/metrics.py`: the seven metrics per PRD §8 as a registry — `{metric_name: {sql_fragment, definition_text, allowed_dimensions}}`. The `definition_text` field is what Stream E's explainability payload reads.
+- [x] **B1.3** (10 min) `backend/core/status_rules.py`: encode status semantics **once** — `delivered`+`delayed` = Delivered Orders; `exception` separate; `in_transit`/`canceled` excluded. Every metric reads from here.
+- [x] **B1.4** (25 min) `backend/core/metrics.py`: the seven metrics per PRD §8 as a registry — `{metric_name: {sql_fragment, definition_text, allowed_dimensions}}`. The `definition_text` field is what Stream E's explainability payload reads.
 
 **Done when:** metrics with no filters reproduce the ground-truth values exactly (400 / 359 / 55 / 84.68% / 15.32% / 3.83).
 
@@ -263,10 +263,10 @@ Required downstream behavior:
 
 *Builds against the metric-registry interface from Wave 0, using a 2-metric stub registry until B1 lands. Integrates in Wave 2.*
 
-- [x] **B2.1** (20 min) `backend/query_tool.py`: compile a StructuredRequest into pandas operations — boolean-mask filters, then `groupby(dimensions).agg(...)`. With no SQL anywhere there is no injection surface to defend, which is the point.
+- [x] **B2.1** (20 min) `backend/tools/query.py`: compile a StructuredRequest into pandas operations — boolean-mask filters, then `groupby(dimensions).agg(...)`. With no SQL anywhere there is no injection surface to defend, which is the point.
 - [x] **B2.2** (20 min) Validation layer: `operation` is one of `query`/`forecast`, metric exists, dimensions allowed for that metric, filter fields/operators allow-listed, limit bounded, and for forecasts `horizon_weeks` is an integer in **1–8** (reject out-of-range, don't clamp) with `grain == "week"`. Reject before computation with a clear error. *(FR-12)*
 - [x] **B2.3** (10 min) Time-preset resolver: `previous_month`, `previous_week`, `last_N_weeks`, `last_N_months`, explicit range → concrete start/end dates.
-- [x] **B2.4** (5 min) `backend/query_api.py`: expose `POST /api/query` returning a QueryResult.
+- [x] **B2.4** (5 min) `backend/api/query.py`: expose `POST /api/query` returning a QueryResult.
 
 **Done when:** a valid request returns a QueryResult; an unknown metric/dimension/operator is rejected before any SQL runs.
 
@@ -289,7 +289,7 @@ Required downstream behavior:
 
 *Needs only raw order dates — independent of the metric layer.*
 
-- [x] **D.1** (15 min) `backend/forecast.py`: build the weekly demand series from `order_date` (**51 complete weeks**, 2–28 orders/week — the data starts Wed and ends Tue, so the first and last ISO weeks are part-weeks and are excluded).
+- [x] **D.1** (15 min) `backend/tools/forecast.py`: build the weekly demand series from `order_date` (**51 complete weeks**, 2–28 orders/week — the data starts Wed and ends Tue, so the first and last ISO weeks are part-weeks and are excluded).
 - [x] **D.2** (30 min) One basic method — least-squares trend fitted over the trailing 12 weeks, honoring `horizon_weeks` (1–8) from the request. Do not implement two to compare. Twelve weeks, not four: weekly counts scatter by ~4 orders around a mean of 7.5, so a slope through four points is noise.
 - [x] **D.3** (15 min) Recommendation with **fixed rule values, not placeholders** *(FR-14, PRD §12)*:
   - `B` = mean weekly orders over the **trailing 4 complete weeks** before the forecast start.
@@ -300,7 +300,7 @@ Required downstream behavior:
   - Return `B`, `F`, the delta, the action, and the rule string — the text is assembled here, never by the LLM.
 - [x] **D.4** (10 min) Methodology note + `history_window` (start, end, observation count). *(FR-13)*
 - [x] **D.5** (10 min) Insufficient-history guard: **fewer than 8 complete weeks** → `insufficient_data: true` + reason, no number. The supplied dataset has 51 complete weeks so this never fires in practice — test it with a deliberately truncated fixture.
-- [x] **D.6** (10 min) `backend/forecast_api.py`: expose `POST /api/forecast` returning a ForecastResult.
+- [x] **D.6** (10 min) `backend/api/forecast.py`: expose `POST /api/forecast` returning a ForecastResult.
 
 **Done when:** a 4-week forecast returns values, horizon, method name, methodology note, history window, and a recommendation carrying B/F/delta — all computed in code, none from an LLM; an 6-week-history fixture returns `insufficient_data: true`.
 
@@ -308,13 +308,13 @@ Required downstream behavior:
 
 *Builds against the StructuredRequest contract + a stubbed Query Tool returning fixture data. Swaps in the real tool in Wave 2.*
 
-- [x] **E.1** (40 min) `backend/orchestrator.py`: LLM tool-calling setup with schema-constrained output producing a valid StructuredRequest. Never raw SQL. *(PRD §9.2)*
+- [x] **E.1** (40 min) `backend/agents/orchestrator.py`: LLM tool-calling setup with schema-constrained output producing a valid StructuredRequest. Never raw SQL. *(PRD §9.2)*
 - [x] **E.2** (25 min) Routing via the `operation` discriminator: `query` → Query Tool, `forecast` → Forecast Tool. Extracting `horizon_weeks` from phrasing like "the next 4 weeks" is part of this task — verify it against "forecast demand for the next 4 weeks" (→ 4) and a bare "forecast demand" (→ a documented default, recommend 4). If using provider function-calling, exposing two tools makes the model's tool choice *be* the routing.
 - [x] **E.3** (20 min) Unsupported path: outside the approved grammar → explanation + list of supported capabilities, `unsupported: true`. *(FR-15)*
 - [x] **E.4** (20 min) Answer composition: one grounded sentence built only from returned values — no model-invented numbers. *(FR-07)*
 - [x] **E.5** (20 min) Explainability assembly: fill contract 4 from the validated request + metric registry's `definition_text` + `metric_basis` (row count + inclusion rule) + result. For forecasts also populate `forecast_details` (horizon, method, history window, baseline, forecast level, recommendation rule) and label `time_range.means` as `history_window` rather than `reported_period`. *(FR-09, FR-10, PRD §11)*
-- [x] **E.6** (5 min) `backend/ask_api.py`: expose `POST /api/ask` returning an AskResponse.
-- [x] **E.7** (10 min) `backend/chart_rules.py` — **owns FR-08**, which no other task covers. Three hardcoded rules, an if/elif/else, not a rules engine:
+- [x] **E.6** (5 min) `backend/api/ask.py`: expose `POST /api/ask` returning an AskResponse.
+- [x] **E.7** (10 min) `backend/core/chart_rules.py` — **owns FR-08**, which no other task covers. Three hardcoded rules, an if/elif/else, not a rules engine:
 
   1. result has a time series → `line` (forecast included; projected segment styled differently)
   2. result has a category dimension → `bar`
@@ -329,7 +329,7 @@ Required downstream behavior:
 *Adds operational tracing for the AI request lifecycle without making Langfuse a runtime dependency for answering questions.*
 
 - [x] **G.1** (10 min) Add the Langfuse SDK and document the required environment variables: `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL`, plus an enable/disable flag if needed. Use deployment secret management or a local untracked `.env`; never commit secret values.
-- [x] **G.2** (20 min) Create `backend/observability.py` as a no-op-safe adapter that starts and flushes a root trace per Ask Operations request, with configurable host and enabled state. It must fail open: tracing errors must not fail or materially delay the user response.
+- [x] **G.2** (20 min) Create `backend/observe/langfuse.py` as a no-op-safe adapter that starts and flushes a root trace per Ask Operations request, with configurable host and enabled state. It must fail open: tracing errors must not fail or materially delay the user response.
 - [x] **G.3** (25 min) Instrument the end-to-end agent lifecycle: root trace for the question/request, generation spans for model calls, spans for query/forecast/decline tool calls, and captured duration, status, errors, selected model, `thread_id`, and deployment environment. Redact API keys and unnecessary personal/sensitive data.
 - [x] **G.4** (10 min) Correlate the Langfuse trace ID with application request/answer logs and, if the response contract is extended, expose only the non-secret trace ID for support/debugging. Keep the existing explainability payload as the user-facing “how this answer was produced” view.
 - [x] **G.5** (10 min) Add tests for enabled and disabled tracing, flush/error fallback, redaction, and one trace containing model plus tool observations. Document local setup and production secret configuration in `README.md`.
@@ -394,15 +394,15 @@ Two requirements are easy to lose because they sit between streams — both are 
 
 | Owner | Files |
 |---|---|
-| Wave 0 (then frozen) | `backend/main.py`, `backend/schemas.py`, `backend/fixtures.py`, `.env.example` |
-| Stream A | `backend/auth.py`, `frontend/auth/**` |
-| Stream B1 | `backend/ingestion.py`, `backend/status_rules.py`, `backend/metrics.py` |
-| Stream B2 | `backend/query_tool.py`, `backend/query_api.py` |
+| Wave 0 (then frozen) | `backend/main.py`, `backend/core/schemas.py`, `backend/core/fixtures.py`, `.env.example` |
+| Stream A | `backend/api/auth.py`, `frontend/auth/**` |
+| Stream B1 | `backend/core/ingestion.py`, `backend/core/status_rules.py`, `backend/core/metrics.py` |
+| Stream B2 | `backend/tools/query.py`, `backend/api/query.py` |
 | Stream C | `frontend/**` (except `frontend/auth/**`) |
-| Stream D | `backend/forecast.py`, `backend/forecast_api.py` |
-| Stream E | `backend/orchestrator.py`, `backend/ask_api.py`, `backend/chart_rules.py` |
+| Stream D | `backend/tools/forecast.py`, `backend/api/forecast.py` |
+| Stream E | `backend/agents/orchestrator.py`, `backend/api/ask.py`, `backend/core/chart_rules.py` |
 | Stream F | deploy config, `.gitignore`, `README.md` |
-| Stream G | `backend/observability.py`, `backend/tests/test_observability.py`, Langfuse dependency/config; Stream G integration edits land in I.6 |
+| Stream G | `backend/observe/langfuse.py`, `backend/tests/test_observability.py`, Langfuse dependency/config; Stream G integration edits land in I.6 |
 
 If a stream believes it needs to edit a file it doesn't own, that's a signal the Wave 0 contract was wrong — fix the contract deliberately and tell the other streams, rather than editing across the boundary.
 

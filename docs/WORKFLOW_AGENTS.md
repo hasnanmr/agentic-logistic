@@ -23,9 +23,9 @@ Stored result 1: delay_rate by carrier, 9 group(s).
 Jadi konteks model tidak pernah memuat satu baris dataset pun, dan teks jawaban
 ditulis oleh kode aplikasi. Angka halusinasi tidak punya jalan masuk (PRD 9).
 
-> **Mencari system prompt?** Ada di [`backend/agent.py`](../backend/agent.py) —
+> **Mencari system prompt?** Ada di [`backend/agents/agent.py`](../backend/agents/agent.py) —
 > `SYSTEM_PROMPT` untuk agent utama dan `_INVESTIGATOR_PROMPT` untuk subagent.
-> Deskripsi tool ada di [`backend/agent_tools.py`](../backend/agent_tools.py).
+> Deskripsi tool ada di [`backend/tools/agent.py`](../backend/tools/agent.py).
 
 ## Arsitektur
 
@@ -35,27 +35,27 @@ ditulis oleh kode aplikasi. Angka halusinasi tidak punya jalan masuk (PRD 9).
 └────────────────────────────┬────────────────────────────────────┘
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                     Ask API (ask_api.py)                        │
+│                     Ask API (api/ask.py)                         │
 │         POST /api/ask   { question, history, thread_id }         │
 └────────────────────────────┬────────────────────────────────────┘
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                  Orchestrator (orchestrator.py)                 │
+│             Orchestrator (agents/orchestrator.py)              │
 │                                                                 │
-│   Sapaan?  ──yes──► smalltalk.py           (tanpa LLM)          │
-│   Glossary carrier? ──yes──► carrier_knowledge.py (tanpa LLM)   │
+│   Sapaan?  ──yes──► core/smalltalk.py     (tanpa LLM)          │
+│   Glossary carrier? ──yes──► core/carrier_knowledge.py (tanpa LLM) │
 │                             │ no                                │
 │                             ▼                                   │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │            Deep Agent (agent.py) — LangGraph loop         │  │
+│  │       Deep Agent (agents/agent.py) — LangGraph loop       │  │
 │  │                                                           │  │
 │  │   write_todos ──► tool call ──► resi ──► koreksi/lanjut    │  │
 │  │        │              │                       │           │  │
 │  │        │              ▼                       │           │  │
 │  │        │   ┌──────────────────────────────┐   │           │  │
-│  │        │   │  agent_tools.py              │   │           │  │
-│  │        │   │   query_tool   ─► query_tool.py            │  │
-│  │        │   │   forecast_tool ─► forecast.py             │  │
+│  │        │   │  tools/agent.py             │   │           │  │
+│  │        │   │   query_tool   ─► tools/query.py          │  │
+│  │        │   │   forecast_tool ─► tools/forecast.py      │  │
 │  │        │   │   decline_tool  ─► catat alasan            │  │
 │  │        │   └──────────────┬───────────────┘   │           │  │
 │  │        │                  │ AskResult          │           │  │
@@ -76,7 +76,7 @@ ditulis oleh kode aplikasi. Angka halusinasi tidak punya jalan masuk (PRD 9).
 
 ## Komponen Utama
 
-### 1. Agent (`backend/agent.py`)
+### 1. Agent (`backend/agents/agent.py`)
 
 **Tanggung Jawab:** Perakitan graph agent, system prompt, batas eksekusi,
 subagent, dan thread percakapan.
@@ -107,7 +107,7 @@ subagent, dan thread percakapan.
 | `general-purpose` | ketiga tool | Menggantikan subagent bawaan deepagents, yang datang dengan seluruh suite filesystem dan tanpa pengetahuan query grammar |
 | `trend-investigator` | `query_tool` | Diagnosis terbuka yang butuh beberapa breakdown sebelum menyimpulkan |
 
-### 2. Agent Tools (`backend/agent_tools.py`)
+### 2. Agent Tools (`backend/tools/agent.py`)
 
 **Tanggung Jawab:** Satu-satunya jalur dari pertanyaan menjadi angka.
 
@@ -117,7 +117,7 @@ subagent, dan thread percakapan.
 | `forecast_tool` | Prediksi demand mingguan 1–8 minggu ke depan |
 | `decline_tool` | Menyatakan dataset tidak bisa menjawab pertanyaan data, beserta alasannya |
 
-Argumen tool diturunkan otomatis dari kontrak Pydantic di `schemas.py` minus
+Argumen tool diturunkan otomatis dari kontrak Pydantic di `backend/core/schemas.py` minus
 diskriminator `operation` — jadi grammar yang dilihat model dan yang divalidasi
 server tidak mungkin berpisah.
 
@@ -132,13 +132,13 @@ dengan dump daftar kapabilitas. Sekarang penolakan adalah sesuatu yang
 **dinyatakan** agent, bukan disimpulkan dari kebisuannya — sehingga jalur sunyi
 bebas untuk pesan yang memang tidak butuh tool.
 
-### 3. Answers (`backend/answers.py`)
+### 3. Answers (`backend/core/answers.py`)
 
 **Tanggung Jawab:** Menyusun prosa jawaban dan payload explainability dari
 hasil yang sudah dihitung. Ini satu-satunya tempat teks jawaban ditulis.
 Dipisahkan dari orchestrator supaya tool bisa ikut memakainya.
 
-### 4. Grounding (`backend/grounding.py`)
+### 4. Grounding (`backend/core/grounding.py`)
 
 **Tanggung Jawab:** Membuktikan bahwa setiap angka yang disebut sebuah narasi
 berasal dari hasil tool.
@@ -152,20 +152,20 @@ Toleransi pembulatan diperhitungkan: narasi yang menulis `18.2%` untuk nilai
 terhitung `18.23%` tetap lolos, karena membulatkan angka yang benar bukan
 mengarang angka.
 
-### 5. Orchestrator (`backend/orchestrator.py`)
+### 5. Orchestrator (`backend/agents/orchestrator.py`)
 
 **Tanggung Jawab:** Batas yang dipakai API. Sejak refactor, ia **bukan lagi
 loop** — loop-nya ada di `agent.py`.
 
 **Alur Eksekusi:**
 1. Tolak pertanyaan kosong
-2. Rute sapaan → `smalltalk.py` (tanpa LLM)
-3. Rute glossary carrier → `carrier_knowledge.py` (tanpa LLM)
+2. Rute sapaan → `backend/core/smalltalk.py` (tanpa LLM)
+3. Rute glossary carrier → `backend/core/carrier_knowledge.py` (tanpa LLM)
 4. Jalankan agent
 5. Tentukan hasilnya: jawaban, balasan prosa, atau penolakan
 6. Susun `AskResponse` dari yang diarsipkan tool
 
-### 6. LLM (`backend/llm.py`)
+### 6. LLM (`backend/core/llm.py`)
 
 **Tanggung Jawab:** Konstruksi chat model dan kredensial. Hanya itu.
 
@@ -179,7 +179,7 @@ loop** — loop-nya ada di `agent.py`.
 Provider apa pun yang OpenAI-compatible bisa dipakai via `ChatOpenAI`.
 `temperature=0` karena pemilihan tool harus reproducible.
 
-### 7. Query Tool (`backend/query_tool.py`)
+### 7. Query Tool (`backend/tools/query.py`)
 
 **Tanggung Jawab:** Eksekusi query terstruktur pada dataset.
 
@@ -214,7 +214,7 @@ Langkah 4 penting: metrik harus bisa membaca kolom yang sedang dikelompokkan.
 kirim, jadi mengelompokkannya per `status` akan pecah kalau kolom itu dibuang.
 Lihat [DATA_CORRECTNESS.md](DATA_CORRECTNESS.md).
 
-**Available Metrics** (definisi lengkap ada di `backend/metrics.py`):
+**Available Metrics** (definisi lengkap ada di `backend/core/metrics.py`):
 
 | Metrik | Deskripsi |
 |--------|-----------|
@@ -239,7 +239,7 @@ status, jadi ratenya pasti 100% atau 0%. Registry menyimpan daftarnya di
 `OnTrac`, `Royal Mail`, `UPS`, `USPS`; region `EU`, `UK`, `US-C`, `US-E`,
 `US-W`; status `delivered`, `delayed`, `exception`, `in_transit`, `canceled`.
 
-### 8. Forecast Tool (`backend/forecast.py`)
+### 8. Forecast Tool (`backend/tools/forecast.py`)
 
 **Tanggung Jawab:** Prediksi demand order mingguan.
 
@@ -265,7 +265,7 @@ status, jadi ratenya pasti 100% atau 0%. Registry menyimpan daftarnya di
 `recommendation`, dan `insufficient_data` bila riwayat tidak cukup. Riwayat
 kurang menghasilkan penolakan beralasan, bukan angka yang dikarang.
 
-### 9. Chart Rules (`backend/chart_rules.py`)
+### 9. Chart Rules (`backend/core/chart_rules.py`)
 
 **Tanggung Jawab:** Pemilihan visualisasi deterministik (FR-08). Tiga aturan di
 kode aplikasi, bukan pilihan model — `visualization: "auto"` berarti "terapkan
@@ -283,7 +283,7 @@ Tipe chart yang tersedia: `bar`, `line`, `column`. Tidak ada pie chart.
 `chart.data` selalu dibangun dari `result.rows` yang sama, jadi chart tidak bisa
 bercerita lain dari tabel di sebelahnya.
 
-### 10. Schemas (`backend/schemas.py`)
+### 10. Schemas (`backend/core/schemas.py`)
 
 **Tanggung Jawab:** Kontrak data beku (Pydantic) yang dibagi backend dan
 frontend.
@@ -322,7 +322,7 @@ memvalidasi rute, coverage, atau SLA tiap baris.
 
 Pesan yang isinya hanya sapaan — "Halo", "Halo selamat pagi", "Selamat siang",
 "Good morning", "你好", "谢谢", "see you" — dijawab dari template di
-`backend/smalltalk.py`. Jalur ini berjalan sebelum agent dibangun, sehingga:
+`backend/core/smalltalk.py`. Jalur ini berjalan sebelum agent dibangun, sehingga:
 
 - tidak ada panggilan LLM (nol biaya dan latensi model),
 - sapaan tetap terjawab walau `LLM_API_KEY` tidak tersedia,

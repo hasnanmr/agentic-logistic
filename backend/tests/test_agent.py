@@ -11,15 +11,15 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from backend.agent import (
+from backend.agents.agent import (
     MAX_MODEL_CALLS,
     SYSTEM_PROMPT,
     build_agent,
     run_agent,
 )
-from backend.agent_tools import DECLINE_TOOL, FORECAST_TOOL, QUERY_TOOL
-from backend.ingestion import load_dataset
-from backend.orchestrator import answer_question
+from backend.tools.agent import DECLINE_TOOL, FORECAST_TOOL, QUERY_TOOL
+from backend.core.ingestion import load_dataset
+from backend.agents.orchestrator import answer_question
 from backend.tests.scripted_model import (
     ScriptedChatModel,
     ToolCall,
@@ -177,6 +177,63 @@ def test_tool_receipts_carry_no_computed_figures(dataset: pd.DataFrame) -> None:
     assert receipts
     assert all(leader_value not in receipt for receipt in receipts)
     assert any("Stored result 1" in receipt for receipt in receipts)
+
+
+def test_unrequested_filter_is_rejected(dataset: pd.DataFrame) -> None:
+    model = ScriptedChatModel(
+        script=script_for(
+            ToolCall(
+                QUERY_TOOL,
+                {
+                    "metric": "delay_rate",
+                    "dimensions": ["carrier"],
+                    "filters": [
+                        {
+                            "field": "region",
+                            "op": "in",
+                            "value": ["US-E", "US-W"],
+                        }
+                    ],
+                },
+            )
+        )
+    )
+
+    run = run_agent(
+        "Which carrier has the highest delay rate?",
+        dataset,
+        agent=build_agent(model),
+    )
+
+    assert not run.collector.results
+    assert run.collector.failures
+    assert "was not stated by the user" in run.collector.failures[-1].reason
+
+
+def test_explicit_filter_is_allowed(dataset: pd.DataFrame) -> None:
+    response = ask(
+        "Which carrier has the highest delay rate in US-E and US-W?",
+        script_for(
+            ToolCall(
+                QUERY_TOOL,
+                {
+                    "metric": "delay_rate",
+                    "dimensions": ["carrier"],
+                    "filters": [
+                        {
+                            "field": "region",
+                            "op": "in",
+                            "value": ["US-E", "US-W"],
+                        }
+                    ],
+                },
+            )
+        ),
+        dataset,
+    )
+
+    assert response.unsupported is False
+    assert response.results[0].explainability.resolved_filters.filters
 
 
 def test_the_dataset_never_enters_the_conversation(dataset: pd.DataFrame) -> None:

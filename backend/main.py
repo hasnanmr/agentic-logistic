@@ -10,10 +10,10 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 # Loads .env into the process environment before anything reads os.environ.
-import backend.config  # noqa: F401
+import backend.core.config  # noqa: F401
 
-from backend import ask_api, auth, forecast_api, query_api
-from backend.auth import require_auth
+from backend.api import ask, auth, forecast, query
+from backend.api.auth import require_auth
 
 
 app = FastAPI(
@@ -39,9 +39,9 @@ app.add_middleware(
 _protected = [Depends(require_auth)]
 
 app.include_router(auth.router)
-app.include_router(query_api.router, dependencies=_protected)
-app.include_router(ask_api.router, dependencies=_protected)
-app.include_router(forecast_api.router, dependencies=_protected)
+app.include_router(query.router, dependencies=_protected)
+app.include_router(ask.router, dependencies=_protected)
+app.include_router(forecast.router, dependencies=_protected)
 
 
 @app.get("/health", tags=["system"])

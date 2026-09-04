@@ -154,10 +154,95 @@ Natural-language question ─> POST /api/ask                         │
                                       + explainability trace
 ```
 
+## Run the apps
+
+From the repository root, install dependencies and create the local environment
+files:
+
+```bash
+cp .env.example .env
+cp frontend/.env.example frontend/.env.local
+uv sync
+cd frontend && npm install
+```
+
+Start the backend and frontend in separate terminals:
+
+```bash
+# Terminal 1, repository root
+uv run uvicorn backend.main:app --reload --port 8080
+
+# Terminal 2, repository root
+cd frontend && npm run dev
+```
+
+Or run both with `make dev`. Then open `http://localhost:3001`. The backend
+health check is `http://localhost:8080/health` and interactive API docs are at
+`http://localhost:8080/docs`. API requests require the `APP_USERNAME` and
+`APP_PASSWORD` values from `.env`.
+
+For frontend-only work, set `NEXT_PUBLIC_DATA_MODE=fixtures` in
+`frontend/.env.local`; this uses bundled responses and does not require the
+backend or an LLM key.
+
+## Test the app
+
+Run the complete test suite from the repository root:
+
+```bash
+uv run pytest -q            # backend tests
+cd frontend && npm test     # frontend tests
+```
+
+The Makefile combines both commands with `make test`. Useful focused checks:
+
+```bash
+uv run pytest backend/tests/test_data_correctness.py -v
+uv run pytest backend/tests/test_agent.py -v
+cd frontend && npm run lint
+```
+
+The backend tests cover ingestion validation, metric correctness, query and
+forecast tools, API authentication, agent tool calls, follow-up turns,
+grounding, localization, and fail-open Langfuse observability. Frontend tests
+cover API/fixture clients, formatting, fixtures, and UI support code.
+
+## Capabilities and limitations
+
+The app can:
+
+- Show logistics KPIs, trends, breakdowns, rankings, filters, and comparisons
+  from the validated CSV dataset.
+- Forecast weekly order demand for a bounded 1–8 week horizon when enough
+  complete weekly history exists.
+- Answer natural-language questions in Indonesian, English, or Chinese through
+  governed `query_tool`, `forecast_tool`, and `decline_tool` calls.
+- Answer carrier glossary questions and greetings locally without an LLM.
+- Return tables, deterministic charts, explainability data, and optional
+  Langfuse traces for Ask Operations.
+- Continue an Ask Operations conversation with client-supplied history or a
+  server-held `thread_id`.
+
+The app does not:
+
+- Accept writes, edits, deletes, shipment updates, or database transactions;
+  the CSV is loaded read-only into memory.
+- Track live shipment locations, connect to carrier APIs, or provide real-time
+  operational status.
+- Include shipping cost, revenue, customer, warehouse, inventory, route,
+  driver, or other fields absent from the CSV.
+- Support arbitrary SQL, arbitrary dimensions/metrics, unbounded forecasts, or
+  unsupported analytical questions; these are rejected or returned as a
+  grounded unsupported response.
+- Guarantee a forecast when the dataset has insufficient complete history.
+- Work on analytical Ask Operations questions without `LLM_API_KEY`; direct
+  dashboard queries, health checks, greetings, and local carrier glossary
+  questions still work without it.
+
 ### Key design decisions
 
-- **One metric implementation.** `backend/metrics.py` is the only KPI
-  registry, and `backend/status_rules.py` is the only definition of status
+- **One metric implementation.** `backend/core/metrics.py` is the only KPI
+  registry, and `backend/core/status_rules.py` is the only definition of status
   membership. The dashboard and conversational paths cannot drift into
   different formulas.
 - **Structured requests, never generated SQL.** Pydantic allow-lists metrics,
@@ -187,16 +272,22 @@ Natural-language question ─> POST /api/ask                         │
 
 | Module | Responsibility |
 |--------|----------------|
-| `backend/ingestion.py` | Load, validate, and cache the CSV. |
-| `backend/status_rules.py` | Define delivered, delayed, and delivery-dated populations. |
-| `backend/metrics.py` | Compute the approved KPI registry. |
-| `backend/query_tool.py` | Resolve dates, apply filters/grouping/sorting, and execute queries. |
-| `backend/forecast.py` | Produce weekly demand forecasts and capacity guidance. |
-| `backend/agent.py` | Configure the agent prompt, planning loop, limits, threads, and subagents. |
-| `backend/agent_tools.py` | Validate tool arguments and collect governed result blocks. |
-| `backend/answers.py` / `backend/grounding.py` | Compose answers and verify optional model narration. |
-| `backend/orchestrator.py` | Run one question and assemble the API response. |
-| `backend/observability.py` | Langfuse tracing adapter for Ask Operations, fail-open by construction. |
+| `backend/core/ingestion.py` | Load, validate, and cache the CSV. |
+| `backend/core/status_rules.py` | Define delivered, delayed, and delivery-dated populations. |
+| `backend/core/metrics.py` | Compute the approved KPI registry. |
+| `backend/tools/query.py` | Resolve dates, apply filters/grouping/sorting, and execute queries. |
+| `backend/tools/forecast.py` | Produce weekly demand forecasts and capacity guidance. |
+| `backend/agents/agent.py` | Configure the agent prompt, planning loop, limits, threads, and subagents. |
+| `backend/tools/agent.py` | Validate tool arguments and collect governed result blocks. |
+| `backend/core/answers.py` / `backend/core/grounding.py` | Compose answers and verify optional model narration. |
+| `backend/agents/orchestrator.py` | Run one question and assemble the API response. |
+| `backend/observe/langfuse.py` | Langfuse tracing adapter for Ask Operations, fail-open by construction. |
+
+The backend package is organized by responsibility: `api/` contains FastAPI
+routers, `agents/` contains LLM orchestration, `tools/` contains governed
+analytics tools, `observe/` contains optional tracing, and `core/` contains
+shared contracts and domain logic. `backend/main.py` is the application
+composition root.
 
 ## Observability (Langfuse tracing)
 
@@ -232,6 +323,13 @@ view — changes based on whether tracing is on.
 3. Ask a question through `/api/ask` and check the Langfuse project's Traces
    view for `ask-operations-request`.
 
+Each `query_tool` observation records the structured request as its input and
+the computed `QueryResult` (columns, rows, population, and truncation state) as
+its output. This lets reviewers compare the agent's requested query with the
+ground truth used to build the dashboard answer. Raw filtered shipment rows are
+not exported by default; set `LANGFUSE_INCLUDE_QUERY_SOURCE_ROWS=true` only
+when that data is safe to send to Langfuse.
+
 Optionally set `CUSTOM_TAGS` to a JSON object to stamp every trace with extra
 labels (team, project, owner, ...), e.g.:
 ```
@@ -251,7 +349,7 @@ Correlation: when tracing is active, the backend logs
 `ask_operations thread=<thread_id> langfuse_trace=<trace_id>` at INFO level, so
 an application log line can be matched to its Langfuse trace for debugging. No
 API key, password, or other credential is ever sent to Langfuse — outgoing
-metadata is passed through `backend.observability.redact`, which masks any
+metadata is passed through `backend.observe.langfuse.redact`, which masks any
 key whose name looks credential-shaped.
 
 ## How questions are interpreted and tools are selected
@@ -378,8 +476,8 @@ grammar, including:
 ## How the numbers are verified
 
 Both the dashboard (`POST /api/query`) and the agent compute through one
-registry, `backend/metrics.py`, over the status semantics in
-`backend/status_rules.py`. So NFR-01 — the two paths must agree — holds by
+registry, `backend/core/metrics.py`, over the status semantics in
+`backend/core/status_rules.py`. So NFR-01 — the two paths must agree — holds by
 construction rather than by discipline: there is no second implementation that
 could drift. The frontend only formats (`KpiCard.tsx`), and every chart is
 built from the rows of the table beside it, so neither can show a different

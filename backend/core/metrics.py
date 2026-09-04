@@ -3,7 +3,7 @@
 Both the dashboard and the AI path compute numbers through this module, which
 is what keeps NFR-01 (the two must reconcile) true by construction rather than
 by discipline. Metric names match the frozen ``MetricName`` literal in
-``backend.schemas``; PRD 8 is the prose version of what is encoded here.
+``backend.core.schemas``; PRD 8 is the prose version of what is encoded here.
 
 Each metric is a plain function over an already-filtered DataFrame, so the same
 definition serves both a scalar KPI and a grouped breakdown - the Query Tool
@@ -17,8 +17,8 @@ from typing import Callable, Final
 
 import pandas as pd
 
-from backend import status_rules
-from backend.status_rules import (
+from backend.core import status_rules
+from backend.core.status_rules import (
     ALL_ORDERS_INCLUSION,
     AVG_DELIVERY_TIME_INCLUSION,
     DELIVERED_INCLUSION,

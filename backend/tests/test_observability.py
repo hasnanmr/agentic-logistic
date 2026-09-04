@@ -1,6 +1,6 @@
 """Stream G: Langfuse tracing must never affect the answer, only observe it.
 
-Every test here proves the fail-open contract from ``backend/observability.py``
+Every test here proves the fail-open contract from ``backend/observe/langfuse.py``
 docstring: tracing off, tracing broken, or tracing's own flush failing must all
 look identical to the caller - a normal :class:`AgentRun`, nothing raised. A
 real Langfuse project is never contacted; the SDK's ``Langfuse`` client and its
@@ -16,10 +16,10 @@ import pandas as pd
 import pytest
 from langchain_core.callbacks import BaseCallbackHandler
 
-from backend import observability
-from backend.agent import build_agent, run_agent
-from backend.agent_tools import QUERY_TOOL
-from backend.ingestion import load_dataset
+from backend.observe import langfuse as observability
+from backend.agents.agent import build_agent, run_agent
+from backend.tools.agent import QUERY_TOOL
+from backend.core.ingestion import load_dataset
 from backend.tests.scripted_model import ScriptedChatModel, ToolCall, script_for
 
 
@@ -46,6 +46,7 @@ _OBSERVABILITY_ENV_VARS = (
     "LANGFUSE_TRACING_ENVIRONMENT",
     "DEPLOYMENT_ENVIRONMENT",
     "CUSTOM_TAGS",
+    "LANGFUSE_INCLUDE_QUERY_SOURCE_ROWS",
 )
 
 
@@ -54,7 +55,7 @@ def _reset_observability_state(monkeypatch: pytest.MonkeyPatch) -> None:
     """Isolate every test from both the adapter's cache and the real `.env`.
 
     The adapter caches its client/failure state at module scope on purpose (so
-    a bad key is reported once, not per-request), and `backend.config` loads
+    a bad key is reported once, not per-request), and `backend.core.config` loads
     the developer's real `.env` at import time - both would otherwise leak
     into tests that assume tracing starts off.
     """
@@ -92,6 +93,7 @@ class FakeLangfuseClient:
     def __init__(self, **kwargs: Any) -> None:
         self.init_kwargs = kwargs
         self.trace_updates: list[dict[str, Any]] = []
+        self.observation_updates: list[dict[str, Any]] = []
         self.flush_calls = 0
         self.span_started = False
 
@@ -101,6 +103,9 @@ class FakeLangfuseClient:
 
     def update_current_trace(self, **kwargs: Any) -> None:
         self.trace_updates.append(kwargs)
+
+    def update_current_span(self, **kwargs: Any) -> None:
+        self.observation_updates.append(kwargs)
 
     def get_current_trace_id(self) -> str:
         return "trace-fake-123"
@@ -359,6 +364,25 @@ def test_annotate_is_a_noop_when_tracing_is_disabled(
 
     with observability.traced_ask_request(question="q", thread_id="t1") as trace:
         trace.annotate(output={"x": 1})  # must not raise
+    observability.annotate_current_observation(output={"x": 1})
+
+
+def test_query_result_is_attached_to_the_current_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _enable(monkeypatch)
+    fake = FakeLangfuseClient()
+    monkeypatch.setattr("langfuse.Langfuse", lambda **kwargs: fake)
+
+    with observability.traced_ask_request(question="q", thread_id="t1"):
+        observability.annotate_current_observation(
+            input={"request": {"metric": "delay_rate"}},
+            output={"columns": ["carrier", "delay_rate"], "rows": [["DHL", 25.0]]},
+        )
+
+    [update] = fake.observation_updates
+    assert update["input"]["request"]["metric"] == "delay_rate"
+    assert update["output"]["rows"] == [["DHL", 25.0]]
 
 
 # --- end to end: one real agent run produces model + tool observations ------
@@ -367,7 +391,7 @@ def test_annotate_is_a_noop_when_tracing_is_disabled(
 def test_a_real_agent_run_drives_model_and_tool_observations(
     monkeypatch: pytest.MonkeyPatch, dataset: pd.DataFrame
 ) -> None:
-    """The wiring in ``backend.agent.run_agent``, not just the adapter alone.
+    """The wiring in ``backend.agents.agent.run_agent``, not just the adapter alone.
 
     Runs the real deepagents graph against a scripted model with tracing
     "on" via fakes, and checks the callback handler that would have shipped
@@ -388,6 +412,11 @@ def test_a_real_agent_run_drives_model_and_tool_observations(
     assert QUERY_TOOL in recorder.tool_starts
     assert fake_client.span_started is True
     assert fake_client.flush_calls == 1
+    assert fake_client.observation_updates
+    query_update = fake_client.observation_updates[-1]
+    assert query_update["input"]["request"]["metric"] == "delay_rate"
+    assert query_update["output"]["columns"] == ["carrier", "delay_rate"]
+    assert query_update["output"]["rows"]
 
 
 def test_tracing_disabled_leaves_the_agent_run_unaffected(

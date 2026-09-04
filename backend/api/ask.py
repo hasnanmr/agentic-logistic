@@ -5,12 +5,12 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
-from backend.agent import get_agent
-from backend.carrier_knowledge import is_carrier_knowledge_question
-from backend.llm import LLMUnavailableError
-from backend.orchestrator import MAX_HISTORY_TURNS, answer_question
-from backend.schemas import AskResponse
-from backend.smalltalk import is_smalltalk
+from backend.agents.agent import get_agent
+from backend.core.carrier_knowledge import is_carrier_knowledge_question
+from backend.core.llm import LLMUnavailableError
+from backend.agents.orchestrator import MAX_HISTORY_TURNS, answer_question
+from backend.core.schemas import AskResponse
+from backend.core.smalltalk import is_smalltalk
 
 
 router = APIRouter(prefix="/api", tags=["ask"])

@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Auth is deliberately absent here. ``backend.auth`` reads APP_USERNAME and
+# Auth is deliberately absent here. ``backend.api.auth`` reads APP_USERNAME and
 # APP_PASSWORD from os.environ itself and returns 503 when either is unset, so
 # a deployment that forgets them is locked rather than open. A constant with a
 # fallback would hand any future caller a working credential pair and quietly

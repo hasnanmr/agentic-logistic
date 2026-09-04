@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, status
 
-from backend.forecast import run_forecast
-from backend.query_tool import QueryToolError
-from backend.schemas import ForecastResult, ForecastStructuredRequest
+from backend.tools.forecast import run_forecast
+from backend.tools.query import QueryToolError
+from backend.core.schemas import ForecastResult, ForecastStructuredRequest
 
 
 router = APIRouter(prefix="/api", tags=["forecast"])

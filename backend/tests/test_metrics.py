@@ -9,9 +9,9 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from backend.ingestion import DatasetError, describe_dataset, load_dataset
-from backend.metrics import METRICS, get_metric
-from backend.schemas import MetricName
+from backend.core.ingestion import DatasetError, describe_dataset, load_dataset
+from backend.core.metrics import METRICS, get_metric
+from backend.core.schemas import MetricName
 
 
 GROUND_TRUTH = {

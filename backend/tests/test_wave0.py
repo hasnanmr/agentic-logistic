@@ -6,18 +6,18 @@ import pandas as pd
 import pytest
 from pydantic import ValidationError
 
-from backend.answers import forecast_explainability, query_explainability
-from backend.fixtures import (
+from backend.core.answers import forecast_explainability, query_explainability
+from backend.core.fixtures import (
     ALL_FIXTURES,
     FORECAST_REQUEST_FIXTURE,
     QUERY_REQUEST_FIXTURE,
 )
-from backend.forecast import run_forecast
-from backend.ingestion import get_dataset
-from backend.query_tool import run_query
+from backend.tools.forecast import run_forecast
+from backend.core.ingestion import get_dataset
+from backend.tools.query import run_query
 from backend.main import app
-from backend.schemas import StructuredRequest
-from backend.schemas import ForecastResult, QueryResult
+from backend.core.schemas import StructuredRequest
+from backend.core.schemas import ForecastResult, QueryResult
 
 
 def test_all_fixtures_are_constructed_pydantic_models() -> None:

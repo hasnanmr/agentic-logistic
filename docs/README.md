@@ -22,19 +22,12 @@ Dokumentasi proyek AI Logistics Analytics Dashboard.
 ```
 Logistic-web-dashboard/
 ├── backend/                 # Python FastAPI backend
-│   ├── main.py             # Application entry point
-│   ├── agent.py            # Deep agent assembly, system prompts, threads
-│   ├── agent_tools.py      # query / forecast / decline tools
-│   ├── orchestrator.py     # Runs the agent, assembles AskResponse
-│   ├── answers.py          # Answer prose and explainability
-│   ├── grounding.py        # Every stated figure traced to a tool result
-│   ├── llm.py              # Chat model construction and credentials
-│   ├── query_tool.py       # Structured query execution
-│   ├── forecast.py         # Demand forecasting
-│   ├── metrics.py          # Metric definitions (single source of truth)
-│   ├── status_rules.py     # Order status semantics
-│   ├── ingestion.py        # Validated, read-only CSV load
-│   ├── schemas.py          # Pydantic contracts
+│   ├── main.py             # Application composition root
+│   ├── api/                # FastAPI routers: ask, auth, query, forecast
+│   ├── agents/             # Deep agent assembly and orchestration
+│   ├── tools/              # Governed query, forecast, and agent tools
+│   ├── observe/            # Optional Langfuse tracing adapter
+│   ├── core/               # Schemas, metrics, ingestion, answers, rules
 │   └── tests/              # Backend tests
 ├── frontend/               # Next.js frontend
 │   ├── app/                # App router pages

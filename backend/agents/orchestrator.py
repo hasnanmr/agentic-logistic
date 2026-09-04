@@ -6,7 +6,7 @@ model never sees a row of data, and by default it never writes a figure in the
 answer either, so a hallucinated number has nowhere to enter (PRD 9).
 
 Since the refactor onto ``deepagents`` this module is no longer the loop - see
-:mod:`backend.agent` for that. What stays here is the boundary the API depends
+:mod:`backend.agents.agent` for that. What stays here is the boundary the API depends
 on: run the agent, decide whether the run produced an answer or a refusal, and
 assemble the :class:`AskResponse` from what the tools filed.
 """
@@ -18,25 +18,30 @@ from typing import Any, Final
 
 import pandas as pd
 
-from backend import grounding
-from backend.agent import (
+from backend.core import grounding
+from backend.agents.agent import (
     MAX_HISTORY_TURNS,
     SYSTEM_PROMPT,
     AgentRun,
     narration_mode,
     run_agent,
 )
-from backend.agent_tools import FORECAST_TOOL, QUERY_TOOL, tool_definitions
-from backend.answers import SUPPORTED_CAPABILITIES
-from backend.carrier_knowledge import compose_carrier_answer
-from backend.ingestion import get_dataset
-from backend.smalltalk import compose_smalltalk_answer
-from backend.schemas import (
+from backend.tools.agent import FORECAST_TOOL, QUERY_TOOL, tool_definitions
+from backend.core.answers import (
+    SUPPORTED_CAPABILITIES,
+    localize_validation_message,
+    supported_capabilities,
+)
+from backend.core.carrier_knowledge import compose_carrier_answer
+from backend.core.ingestion import get_dataset
+from backend.core.smalltalk import compose_smalltalk_answer
+from backend.core.schemas import (
     AskResponse,
     AskResult,
     CarrierKnowledge,
     CarrierKnowledgeItem,
     Runtime,
+    SmalltalkLanguage,
     SmalltalkReply,
 )
 
@@ -56,13 +61,15 @@ __all__ = [
 _UNKNOWN_TOOL_MARKERS: Final = ("is not a valid tool", "not found", "no tool named")
 
 
-def _unsupported(reason: str, thread_id: str | None = None) -> AskResponse:
+def _unsupported(
+    reason: str, thread_id: str | None = None, language: SmalltalkLanguage = "en"
+) -> AskResponse:
     return AskResponse(
         answer="",
         results=[],
         thread_id=thread_id,
         unsupported=True,
-        unsupported_reason=f"{reason} {SUPPORTED_CAPABILITIES}",
+        unsupported_reason=f"{reason} {supported_capabilities(language)}",
     )
 
 
@@ -74,7 +81,29 @@ def _attempted_a_tool(run: AgentRun) -> bool:
     )
 
 
-def _refusal_reason(run: AgentRun) -> str:
+#: The three static fallback refusal reasons, in each supported language. A
+#: decline reason is the model's own text, written in the question's language
+#: per ``SYSTEM_PROMPT`` and used verbatim; a Query Tool validation failure is
+#: localized by pattern via ``answers.localize_validation_message`` instead,
+#: since that text is generated in ``backend/tools/query.py``, not by the model.
+_NO_SUCH_TOOL: Final[dict[SmalltalkLanguage, str]] = {
+    "id": "Agen meminta tool yang tidak ada.",
+    "en": "The agent asked for a tool that does not exist.",
+    "zh": "代理请求了一个不存在的工具。",
+}
+_GRAMMAR_MISMATCH: Final[dict[SmalltalkLanguage, str]] = {
+    "id": "Permintaan tidak sesuai dengan tata bahasa query yang disetujui ({count} panggilan ditolak).",
+    "en": "The request did not match the approved query grammar ({count} rejected call(s)).",
+    "zh": "请求不符合已批准的查询语法（{count} 次调用被拒绝）。",
+}
+_CANNOT_ANSWER: Final[dict[SmalltalkLanguage, str]] = {
+    "id": "Pertanyaan tersebut tidak dapat dijawab dari dataset ini.",
+    "en": "That question cannot be answered from this dataset.",
+    "zh": "该数据集无法回答这个问题。",
+}
+
+
+def _refusal_reason(run: AgentRun, language: SmalltalkLanguage = "en") -> str:
     """Why a run that computed nothing produced no answer.
 
     The most specific explanation wins: a grammar violation our own tools
@@ -86,7 +115,8 @@ def _refusal_reason(run: AgentRun) -> str:
         return run.collector.decline.rstrip(".") + "."
 
     if run.collector.failures:
-        return run.collector.failures[-1].reason.rstrip(".") + "."
+        reason = run.collector.failures[-1].reason
+        return localize_validation_message(reason, language).rstrip(".") + "."
 
     if run.tool_errors:
         if any(
@@ -94,13 +124,10 @@ def _refusal_reason(run: AgentRun) -> str:
             for error in run.tool_errors
             for marker in _UNKNOWN_TOOL_MARKERS
         ):
-            return "The agent asked for a tool that does not exist."
-        return (
-            "The request did not match the approved query grammar "
-            f"({len(run.tool_errors)} rejected call(s))."
-        )
+            return _NO_SUCH_TOOL[language]
+        return _GRAMMAR_MISMATCH[language].format(count=len(run.tool_errors))
 
-    return "That question cannot be answered from this dataset."
+    return _CANNOT_ANSWER[language]
 
 
 def _with_runtime(results: list[AskResult], runtime: Runtime) -> list[AskResult]:
@@ -234,7 +261,14 @@ def answer_question(
                 unsupported=False,
                 unsupported_reason=None,
             )
-        return _unsupported(_refusal_reason(run), thread_id=run.thread_id)
+        # The language the model itself declared on whichever tool call it
+        # attempted (see tools/agent.py's `language` argument) - far more
+        # reliable than guessing from the raw question text, and available
+        # even for a call the tools went on to reject.
+        language = run.collector.language
+        return _unsupported(
+            _refusal_reason(run, language), thread_id=run.thread_id, language=language
+        )
 
     runtime = Runtime(
         total_ms=round(total_ms, 1),

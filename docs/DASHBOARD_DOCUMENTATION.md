@@ -62,7 +62,7 @@ make dev
 
 # Atau jalankan terpisah:
 # Backend (port 8080)
-cd backend && uvicorn main:app --reload --port 8080
+uv run uvicorn backend.main:app --reload --port 8080
 
 # Frontend (port 3001)
 cd frontend && npm run dev
