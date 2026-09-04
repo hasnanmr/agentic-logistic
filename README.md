@@ -591,3 +591,5 @@ make docker-build # Build Docker image
 make docker-run   # Run Docker container
 make clean        # Clean build artifacts
 ```
+
+Assisted by Claude Opus and Sonnet
