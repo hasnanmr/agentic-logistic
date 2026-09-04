@@ -225,3 +225,76 @@ def test_unsupported_reason_falls_back_to_the_static_english_message(
 
     assert response.unsupported is True
     assert "cannot be answered from this dataset" in response.unsupported_reason
+
+
+# --- the per-turn language pin ---------------------------------------------
+#
+# The system prompt carries the language rule, but on a follow-up turn it sits
+# far above a history whose earlier turns may be in another language - which is
+# how an English question came back answered in the Indonesian of an earlier
+# turn. ``_pin_reply_language`` restates the rule with the current question
+# quoted, on every model call.
+
+
+def _system_prompt_seen(model: ScriptedChatModel, call: int = 0) -> str:
+    """The system message the model was handed on ``call``."""
+
+    return model.seen[call][0].text
+
+
+INDONESIAN_HISTORY = [
+    {"role": "user", "content": "Kurir mana yang paling sering telat?"},
+    {"role": "assistant", "content": "DHL memiliki tingkat keterlambatan tertinggi."},
+]
+
+
+def test_the_pin_quotes_the_current_question_not_an_earlier_one(
+    dataset: pd.DataFrame,
+) -> None:
+    model = ScriptedChatModel(script=[says("Delay rate is the share of late orders.")])
+
+    answer_question(
+        "Based on what do you count the delay rate?",
+        build_agent(model),
+        dataset,
+        history=INDONESIAN_HISTORY,
+    )
+
+    prompt = _system_prompt_seen(model)
+    assert "Based on what do you count the delay rate?" in prompt
+    assert "Kurir mana yang paling sering telat?" not in prompt
+    assert "never from your own\nearlier replies" in prompt
+
+
+def test_the_pin_is_restated_on_every_model_call_of_a_run(
+    dataset: pd.DataFrame,
+) -> None:
+    """A run that calls a tool goes back to the model for its closing prose;
+    the reminder has to be there too, since that is the text the user reads."""
+
+    model = ScriptedChatModel(script=script_for(RANKING))
+
+    answer_question("Which carrier has the highest delay rate?", build_agent(model), dataset)
+
+    assert model.calls > 1
+    for call in range(model.calls):
+        assert "Reply language for this turn" in _system_prompt_seen(model, call)
+
+
+def test_the_pin_never_enters_the_conversation_itself(dataset: pd.DataFrame) -> None:
+    """It is built per model call from messages that call already carries, so
+    the checkpointed thread - and any history replayed into a later turn -
+    stays exactly what the user and the agent actually said."""
+
+    model = ScriptedChatModel(script=[says("Delay rate is the share of late orders.")])
+
+    answer_question(
+        "Based on what do you count the delay rate?",
+        build_agent(model),
+        dataset,
+        history=INDONESIAN_HISTORY,
+    )
+
+    conversation = model.seen[0][1:]
+    assert conversation
+    assert all("Reply language for this turn" not in message.text for message in conversation)

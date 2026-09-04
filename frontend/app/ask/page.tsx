@@ -8,6 +8,7 @@ import EmptyState from "../components/EmptyState";
 import { SendIcon, SparkleIcon } from "../components/icons";
 import TraceSidebar from "../components/TraceSidebar";
 import { askQuestion } from "@/lib/api";
+import { plainText } from "@/lib/format";
 import { ASK_RESPONSE_FIXTURE } from "@/lib/fixtures";
 import { ApiError, type AskResponse, type AskResult, type HistoryTurn } from "@/lib/types";
 
@@ -154,11 +155,15 @@ export default function AskPage() {
                   ) : message.response && message.response.unsupported ? (
                     <>
                       <p className="chat-text">That question is outside what the data can answer.</p>
-                      <p className="chat-text muted">{message.response.unsupported_reason}</p>
+                      {/* The refusal quotes the agent's own decline reason, so
+                          it goes through the same markdown cleanup as an answer. */}
+                      <p className="chat-text muted">{plainText(message.response.unsupported_reason ?? "")}</p>
                     </>
                   ) : (
                     <>
-                      <p className="chat-text">{message.text}</p>
+                      {/* Model-written prose, rendered as plain text: strip any
+                          markdown it wrote so `**bold**` is not read literally. */}
+                      <p className="chat-text">{plainText(message.text)}</p>
                       {/* One block per tool call the agent made. A single
                           figure renders exactly as it always did; a compound
                           question adds a labelled block for each part. */}

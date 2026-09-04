@@ -22,6 +22,7 @@ import logging
 import os
 import uuid
 from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any, Final
@@ -31,12 +32,21 @@ from deepagents import create_deep_agent
 from deepagents.middleware.filesystem import FilesystemMiddleware
 from langchain.agents.middleware import (
     ModelCallLimitMiddleware,
+    ModelRequest,
+    ModelResponse,
     TodoListMiddleware,
     ToolCallLimitMiddleware,
     ToolErrorMiddleware,
+    wrap_model_call,
 )
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langgraph.checkpoint.memory import InMemorySaver
 
 from backend.observe import langfuse as observability
@@ -102,6 +112,16 @@ Chinese sentence does not make the sentence English. All other tool arguments
 (metric names, dimensions, filter values) stay in English regardless, since
 those are fixed schema identifiers, not prose.
 
+Judge that language from the user's latest message alone. Earlier turns never
+carry their language into this one - not the user's own earlier questions, and
+not your earlier replies. A conversation that opens in Indonesian and then
+switches to English is answered in English from that message onward, and the
+reverse holds just as strictly.
+
+Write plain prose with no markdown at all: no asterisks around words, no
+bullet lists, no headings, no backticks. Your text is rendered as plain text,
+so a stray `**` reaches the user as two asterisks rather than as emphasis.
+
 Not every message is a data question. Answer these yourself, in one or two
 sentences and with no tool at all:
 - A greeting or small talk: greet the person back and say what you can look up.
@@ -144,6 +164,58 @@ each call fully specified, and stop once the relevant dimensions have been
 queried. Report which breakdowns you ran and why - never a number.
 
 {SUPPORTED_CAPABILITIES}"""
+
+#: Restated on every model call of a run, with the current question quoted.
+#: The rule is already in ``SYSTEM_PROMPT``, but on a follow-up turn that
+#: system prompt sits far above a history whose earlier turns may be in
+#: another language, and the model would answer an English question in the
+#: Indonesian of two turns ago. Quoting the message the reply belongs to,
+#: immediately before the model writes, is what keeps the two together.
+_LANGUAGE_PIN: Final = """
+
+Reply language for this turn. The user's latest message is:
+{question}
+Write every word of your own prose in that message's language, judged from
+that message alone - never from an earlier turn and never from your own
+earlier replies. Set the `language` argument of every tool call you make this
+turn from that same message. Write plain sentences with no markdown: no
+asterisks, bullets, headings or backticks."""
+
+
+def _latest_question(messages: list[BaseMessage]) -> str:
+    """The most recent user message, which is the one being answered."""
+
+    for message in reversed(messages):
+        if isinstance(message, HumanMessage):
+            return message.text.strip()
+    return ""
+
+
+@wrap_model_call
+def _pin_reply_language(
+    request: ModelRequest, handler: Callable[[ModelRequest], ModelResponse]
+) -> ModelResponse:
+    """Append the per-turn language reminder to the system prompt.
+
+    Transient by construction: the reminder is built for one model call from
+    the messages that call already carries, so nothing about it is written
+    into the checkpointed thread and a resumed conversation is unchanged.
+    """
+
+    question = _latest_question(list(request.messages))
+    if not question:
+        return handler(request)
+
+    system = request.system_message
+    base = system.text if system is not None else SYSTEM_PROMPT
+    return handler(
+        request.override(
+            system_message=SystemMessage(
+                base + _LANGUAGE_PIN.format(question=question)
+            )
+        )
+    )
+
 
 #: Caps on one run. An agent loop against a paid endpoint needs a ceiling, and
 #: no legitimate question here needs more than a handful of steps.
@@ -241,6 +313,13 @@ def build_agent(model: BaseChatModel, checkpointer: Any | None = None) -> Any:
             ),
             ModelCallLimitMiddleware(run_limit=MAX_MODEL_CALLS, exit_behavior="end"),
             ToolCallLimitMiddleware(run_limit=MAX_TOOL_CALLS, exit_behavior="continue"),
+            # Keep _pin_reply_language last. The list runs outside-in, so the
+            # last entry is the innermost - the closest to the model, and the
+            # last to touch the system prompt. Moved earlier, TodoListMiddleware
+            # appends its own instructions *after* the pin and buries the
+            # quoted question under them, which is the placement the pin exists
+            # to avoid.
+            _pin_reply_language,
         ],
         subagents=_subagents(),
         context_schema=AgentContext,

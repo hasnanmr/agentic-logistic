@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildRequestFilters, describeFilters, EMPTY_FILTERS, type DashboardFilters } from "./format";
+import { buildRequestFilters, describeFilters, EMPTY_FILTERS, plainText, type DashboardFilters } from "./format";
 
 describe("buildRequestFilters", () => {
   it("builds filters in the API's expected order", () => {
@@ -39,5 +39,34 @@ describe("describeFilters", () => {
     [{ ...EMPTY_FILTERS, carrier: "FedEx", region: "US-E" }, ["carrier FedEx", "region US-E"]],
   ])("describes %o", (filters, expected) => {
     expect(describeFilters(filters as DashboardFilters)).toEqual(expected);
+  });
+});
+
+describe("plainText", () => {
+  it.each([
+    ["Delay rate is **terlambat** over **total pesanan**.", "Delay rate is terlambat over total pesanan."],
+    ["*emphasis* and __strong__ and ***both***", "emphasis and strong and both"],
+    ["Use the `delay_rate` metric.", "Use the delay_rate metric."],
+    ["## Heading\n- first\n* second\n+ third", "Heading\nfirst\nsecond\nthird"],
+  ])("strips markdown from %j", (raw, expected) => {
+    expect(plainText(raw)).toBe(expected);
+  });
+
+  it.each([
+    "DHL is from Germany.",
+    "Delay rate rose 5% in batch #3.",
+    "Multiply 3 * 4 to get the total.",
+    "The snake_case column is order_date.",
+  ])("leaves plain prose untouched: %j", (text) => {
+    expect(plainText(text)).toBe(text);
+  });
+
+  it("leaves single underscores alone, since identifiers pair them up", () => {
+    // "the snake_case column is order_date" reads as italics to a greedy rule.
+    expect(plainText("_italic_ text")).toBe("_italic_ text");
+  });
+
+  it("keeps unmatched markers rather than guessing", () => {
+    expect(plainText("An unclosed **marker stays")).toBe("An unclosed **marker stays");
   });
 });
