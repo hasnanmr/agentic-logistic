@@ -27,6 +27,10 @@ jobs:
       # is paid again on every run - that was the bulk of the test step.
       UV_COMPILE_BYTECODE: "1"
       PYTHONUNBUFFERED: "1"
+      # CI tests use scripted models and fake Langfuse clients where tracing
+      # behavior is covered. Never let a real exporter retry a network call
+      # and hold the backend job until its workflow timeout.
+      LANGFUSE_ENABLED: "false"
 
     steps:
       - name: Check out repository
